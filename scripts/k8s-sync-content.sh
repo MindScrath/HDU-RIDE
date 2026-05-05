@@ -31,6 +31,6 @@ spec:
 EOF
 
 kubectl wait -n "$NAMESPACE" --for=condition=Ready pod/hdu-ride-content-sync --timeout=120s
-kubectl exec -n "$NAMESPACE" hdu-ride-content-sync -- sh -c "rm -rf /content/*"
-tar -C "$CONTENT_DIR" -cf - . | kubectl exec -i -n "$NAMESPACE" hdu-ride-content-sync -- tar -C /content -xf -
+MSYS_NO_PATHCONV=1 kubectl exec -n "$NAMESPACE" hdu-ride-content-sync -- sh -c "rm -rf /content/*"
+tar -C "$CONTENT_DIR" -cf - . | MSYS_NO_PATHCONV=1 kubectl exec -i -n "$NAMESPACE" hdu-ride-content-sync -- tar -C /content -xf -
 printf 'Synced %s to PVC hdu-ride-content in namespace %s\n' "$CONTENT_DIR" "$NAMESPACE"
