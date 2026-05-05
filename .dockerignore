@@ -1,0 +1,10 @@
+.git
+.env
+**/node_modules
+**/dist
+**/.vite
+**/.vite-temp
+backend/backend.exe
+storage
+tmp
+*.tar

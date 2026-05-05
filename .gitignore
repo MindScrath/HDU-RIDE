@@ -1,0 +1,9 @@
+**/node_modules/
+**/dist/
+**/.vite/
+**/*.exe
+**/*.test
+backend/hdu-ride-backend
+.env
+storage/
+tmp/

@@ -1,0 +1,29 @@
+id: intro-r
+title: R 语言入门
+description: 面向计量金融课程的 R 语言基础、数据处理与可视化训练
+
+chapters:
+  - id: r-foundation
+    title: 第1章 R 语言基础
+    order: 1
+    sections:
+      - id: welcome
+        file: chapters/01-welcome.md
+        title: 1.1 课程介绍
+        order: 1
+      - id: dataframe
+        file: chapters/02-data-frame.md
+        title: 1.2 数据框与 tibble
+        order: 2
+  - id: visualization
+    title: 第2章 可视化基础
+    order: 2
+    sections:
+      - id: plot
+        file: chapters/03-plot.md
+        title: 2.1 收益率可视化
+        order: 1
+
+assignments:
+  - id: hw01
+    title: 第一次作业：基础数据处理
