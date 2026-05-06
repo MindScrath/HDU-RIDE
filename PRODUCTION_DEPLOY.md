@@ -207,3 +207,11 @@ RStudio 需要挂载工作区磁盘，由于我们在 `.env` 中把 `WORKSPACE_S
 **4. Nginx WebSocket 配置错误**
 RStudio 强依赖 WebSocket。如果打开后页面是空白或者报连接断开错误，说明外层 Nginx 的 WebSocket 反代配置有误。
 *   **解决**：检查 `/etc/nginx/sites-available/hdu-ride` 中是否严格包含了 `proxy_set_header Upgrade $http_upgrade;` 和 `proxy_set_header Connection "upgrade";`。
+
+**7. 教师批阅时网页转圈后报错 502 (workspace gateway error)**
+如果您的云主机日志中出现 `workspace gateway error ... err=context canceled` 并且前端请求 `/ide/s/.../events/get_events` 返回 `502`。这说明：Kubernetes 内部的 Pod 是存活的，但云主机的内部 DNS 解析不到 `rstudio-xxxx.hdu-ride.svc.cluster.local` 这个内部域名，或者 Kubernetes 内部网络（Flannel/Cilium等）未能成功打通后端容器到 RStudio 容器的流量。
+*   **排查**：在云主机上执行 `kubectl get pods -n kube-system` 检查 `coredns` 是否运行正常。然后执行 `kubectl get svc -n hdu-ride` 确认服务是否存在。
+*   **最常见原因**：在使用 `kubeadm` 单节点裸机部署时，经常会因为服务器开启了防火墙或 iptables 规则导致内部跨 Pod 通信被拦截。
+*   **解决办法**：
+    1.  确认服务器的安全组或 UFW 防火墙允许 `10.244.0.0/16` 和 `10.96.0.0/12`（Flannel和Service的默认网段）的互通：`sudo ufw allow in on cni0 && sudo ufw allow in on flannel.1`。
+    2.  如果您使用阿里云等云主机，确保您的网卡没有丢弃桥接流量。可以尝试重启服务器，并重启容器运行时 `sudo systemctl restart containerd && sudo systemctl restart kubelet`。
