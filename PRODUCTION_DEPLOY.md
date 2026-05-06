@@ -174,10 +174,36 @@ sudo nginx -t
 sudo systemctl restart nginx
 ```
 
-## 6. 验收上线与日常维护
+## 7. 常见问题排查
 
-1. **解析域名**：前往您的域名服务商控制台，将 `ride.mindsratch.top` 的 A 记录指向该 Ubuntu 云主机的公网 IP。
-2. **访问网站**：浏览器打开 `http://ride.mindsratch.top` 即可访问系统。
-3. **初始化**：首次登录请使用 `root` 账号，创建班级并导入学生成员。学生必须在班级内才能正常启动 RStudio 工作区。
-4. **日常发作业/更新讲义**：
-   管理员只需将电脑上的 Markdown 或 YAML 配置文件，通过 SFTP/SCP 上传到云主机的 `/opt/hdu-ride/content` 目录中。由于做了物理挂载，您上传完毕后，**不需要重启任何服务**，前端直接刷新页面，新作业和讲义即刻生效！极大地提升了内容发布效率。
+### 7.1 前端网页可以打开，但点击“打开 RStudio”报错或无反应
+
+如果您的网页可以正常访问并登录，但点击作业列表里的“打开 RStudio”时转圈后失败，通常是以下几种原因导致的，请按照顺序排查：
+
+**1. 账号未加入班级（最常见业务错误）**
+如前文“验收上线”所述，新创建的学生账号必须被加入到某个具体的“班级”中。如果账号不属于任何班级，在点击打开 RStudio 时，后端会因为缺乏权限校验参数而直接返回 403 Forbidden。
+*   **解决**：使用 root 账号登录 -> 班级管理 -> 将该学生加入班级。
+
+**2. RStudio 容器拉取失败（网络问题）**
+RStudio 的镜像体积较大（约 1.5GB+），如果您是第一次打开，Kubernetes 需要去 Docker Hub 拉取 `rocker/rstudio`。如果国内网络超时，容器就会启动失败。
+*   **排查**：在服务器上执行 `kubectl get pods -n hdu-ride`，看是否有一个前缀为 `rstudio-` 的 Pod 处于 `ImagePullBackOff` 或 `ErrImagePull` 状态。
+*   **解决**：手动拉取并导入镜像：
+    ```bash
+    sudo docker pull rocker/rstudio:4.6.0
+    sudo docker save rocker/rstudio:4.6.0 -o rstudio.tar
+    sudo ctr -n=k8s.io images import rstudio.tar
+    ```
+
+**3. 存储卷 (PVC) 分配失败（底层环境问题）**
+RStudio 需要挂载工作区磁盘，由于我们在 `.env` 中把 `WORKSPACE_STORAGE_CLASS` 配置成了 `standard`，如果您的裸机 K8s 没有默认的存储提供者，它就无法分配磁盘。
+*   **排查**：执行 `kubectl get pvc -n hdu-ride`，看属于 rstudio 的 PVC 状态是否一直为 `Pending`。
+*   **解决**：在单节点裸机 K8s 中，最简单的做法是安装 `local-path-provisioner` 来提供基于本地磁盘的 dynamic provisioning：
+    ```bash
+    kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+    kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+    ```
+    然后修改 `.env` 将 `WORKSPACE_STORAGE_CLASS` 改为 `local-path`，并重启后端服务。
+
+**4. Nginx WebSocket 配置错误**
+RStudio 强依赖 WebSocket。如果打开后页面是空白或者报连接断开错误，说明外层 Nginx 的 WebSocket 反代配置有误。
+*   **解决**：检查 `/etc/nginx/sites-available/hdu-ride` 中是否严格包含了 `proxy_set_header Upgrade $http_upgrade;` 和 `proxy_set_header Connection "upgrade";`。
