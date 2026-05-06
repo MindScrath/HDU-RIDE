@@ -2,29 +2,45 @@
 
 本文档专为在 Ubuntu 云主机上进行生产环境正式部署而编写，目标域名以 `ride.mindsratch.top` 为例。
 
-部署方案采用了 **K3s (轻量级 Kubernetes) + 宿主机直接挂载内容目录 + Nginx 反向代理** 的架构。
+部署方案采用了 **标准版 Kubernetes (kubeadm) + 宿主机直接挂载内容目录 + Nginx 反向代理** 的架构。我们采用标准的生产级别 K8s，以满足高可用和严肃生产的需求。
 
 这种架构的**最大优势**在于：
-> **内容热更新**：通过 K3s 的 HostPath 挂载，管理员只需要在 Ubuntu 宿主机的 `/opt/hdu-ride/content` 目录中修改/添加作业和讲义（甚至可以通过 Git 定时 Pull），网站内容就会**立即自动生效**，无需执行任何复杂的同步脚本或重启服务！
+> **内容热更新**：通过 Kubernetes 的 HostPath 挂载，管理员只需要在 Ubuntu 宿主机的 `/opt/hdu-ride/content` 目录中修改/添加作业和讲义（甚至可以通过 Git 定时 Pull），网站内容就会**立即自动生效**，无需执行任何复杂的同步脚本或重启服务！
 
 ---
 
 ## 1. 基础环境准备
 
-在您的 Ubuntu 云主机上，首先安装必要的软件：K3s、Docker 和 Nginx。
+在您的 Ubuntu 云主机上，首先安装必要的软件：Docker、标准的 Kubernetes (kubeadm, kubelet, kubectl) 以及 Nginx。
 
 ```bash
 # 1. 更新系统包并安装 Docker 和 Nginx
 sudo apt update
-sudo apt install -y curl git docker.io nginx
+sudo apt install -y curl git docker.io nginx apt-transport-https ca-certificates curl gpg
 
-# 2. 安装 K3s (专为单机生产优化的极简 K8s)
-curl -sfL https://get.k3s.io | sh -
+# 2. 安装生产级别标准 Kubernetes 组件
+# 添加 Kubernetes 官方 GPG 密钥
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+# 添加 Kubernetes apt 仓库
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+# 安装 kubelet, kubeadm 和 kubectl，并锁定版本
+sudo apt update
+sudo apt install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
 
-# 3. 配置 kubectl 权限 (允许当前非 root 用户直接使用 kubectl)
-mkdir -p ~/.kube
-sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-sudo chown $(id -u):$(id -g) ~/.kube/config
+# 3. 初始化单节点 Kubernetes 集群
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+
+# 4. 配置 kubectl 权限 (允许当前非 root 用户直接使用 kubectl)
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# 5. 去除 Master 节点污点（由于是单机部署，必须允许 Pod 调度到主节点）
+kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+
+# 6. 安装网络插件 (Flannel)
+kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
 ```
 
 ## 2. 获取代码与极简内容目录配置
@@ -46,23 +62,25 @@ cp -r content/* /opt/hdu-ride/content/
 
 > **原理解析**：我们在 `deploy/k8s/content-pvc-prod.yml` 中声明了一个指向 `/opt/hdu-ride/content` 的 PersistentVolume，并将其绑定到了 `hdu-ride-content` 这个 PVC 上。这使得后端的 `/content` 目录与宿主机实现了双向直通。
 
-## 3. 构建生产环境镜像并导入 K3s
+## 3. 构建生产环境镜像并导入集群
 
-为了稳定运行，我们需要把前端（Vue）和后端（Go）构建为镜像，并喂给 K3s 内部引擎（Containerd）。
+由于我们使用了原生的 Kubernetes 和 Containerd（或 Docker 作为底层运行时），我们需要将构建的镜像喂给节点。
 
 ```bash
 cd /opt/hdu-ride
 
-# 1. 编译后端镜像并导入
+# 1. 编译后端镜像
 sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
-sudo docker save hdu-ride-backend:latest -o backend.tar
-sudo k3s ctr images import backend.tar
 
-# 2. 编译前端镜像并导入
+# 2. 编译前端镜像
 # (前端 Dockerfile 已配置自动下载 bun 并编译打包为 Nginx 静态服务)
 sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
+
+# 3. 将 Docker 镜像加载到 Kubernetes 运行时 (如果使用的是 kubeadm + containerd)
+sudo docker save hdu-ride-backend:latest -o backend.tar
 sudo docker save hdu-ride-frontend:latest -o frontend.tar
-sudo k3s ctr images import frontend.tar
+sudo ctr -n=k8s.io images import backend.tar
+sudo ctr -n=k8s.io images import frontend.tar
 ```
 
 ## 4. 部署服务到 Kubernetes 集群
@@ -79,7 +97,7 @@ nano .env
 > 3. `SESSION_SECRET`: 随意输入一段长且复杂的随机英文字符串（用于加密 Cookie）。
 > 4. `ROOT_PASSWORD`: 设定您超级管理员 `root` 的登录密码（比如：`Admin@2026`）。
 > 5. `ROOT_PASSWORD_HASH`: **这是最重要的一步！** 后端不能直接存明文密码，您需要在**本地电脑**（装有 Go 环境的地方）进入项目的 `backend` 目录，执行 `go run . hash-password 您的密码`，它会输出一串类似 `$2a$10$xxxx` 的字符。将这串字符复制，填写到服务器 `.env` 的 `ROOT_PASSWORD_HASH=` 后面。
-> 6. `WORKSPACE_STORAGE_CLASS`: 确保其值为 `local-path` (K3s 的默认存储类)，以支持本地磁盘分配。
+> 6. `WORKSPACE_STORAGE_CLASS`: 确保其值为 `standard` (或其他您在原生 K8s 中安装并配置的 StorageClass 名称)，以支持动态分配。
 
 为了方便一键启动生产服务，我们在 `scripts/` 下提供了一个生产部署脚本 `k8s-prod-up.sh`。可以直接执行，它会读取 `.env` 并创建所有 K8s 资源：
 
@@ -109,7 +127,7 @@ server {
     # sudo certbot --nginx -d ride.mindsratch.top
 
     location / {
-        # 代理到内部的 K3s NodePort (前端容器)
+        # 代理到内部的 NodePort (前端容器)
         proxy_pass http://127.0.0.1:30080;
         proxy_http_version 1.1;
         

@@ -74,7 +74,7 @@ kubectl create secret generic hdu-ride-backend-env -n "$NAMESPACE" \
   --from-literal=ROOT_PASSWORD_HASH="$ROOT_PASSWORD_HASH" \
   --from-literal=K8S_NAMESPACE="$NAMESPACE" \
   --from-literal=WORKSPACE_IMAGE_DEFAULT="$WORKSPACE_IMAGE" \
-  --from-literal=WORKSPACE_STORAGE_CLASS="${WORKSPACE_STORAGE_CLASS:-local-path}" \
+  --from-literal=WORKSPACE_STORAGE_CLASS="${WORKSPACE_STORAGE_CLASS:-standard}" \
   --from-literal=WORKSPACE_CPU_REQUEST="${WORKSPACE_CPU_REQUEST:-500m}" \
   --from-literal=WORKSPACE_CPU_LIMIT="${WORKSPACE_CPU_LIMIT:-1}" \
   --from-literal=WORKSPACE_MEM_REQUEST="${WORKSPACE_MEM_REQUEST:-1Gi}" \
