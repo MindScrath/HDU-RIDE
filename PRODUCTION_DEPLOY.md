@@ -28,8 +28,27 @@ sudo apt update
 sudo apt install -y kubelet kubeadm kubectl
 sudo apt-mark hold kubelet kubeadm kubectl
 
+# 配置 Containerd 兼容 kubelet 的 Cgroup 驱动以及配置沙箱镜像
+sudo mkdir -p /etc/containerd
+containerd config default | sudo tee /etc/containerd/config.toml
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+sudo sed -i "s|sandbox = .*|sandbox = \"registry.aliyuncs.com/google_containers/pause:3.9\"|g" /etc/containerd/config.toml
+sudo systemctl restart containerd
+
 # 3. 初始化单节点 Kubernetes 集群
-sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+# 初始化前，需要开启内核模块以支持 iptables 桥接（这是 K8s 网络的要求）
+sudo modprobe br_netfilter
+echo "br_netfilter" | sudo tee /etc/modules-load.d/br_netfilter.conf
+echo "net.bridge.bridge-nf-call-iptables=1" | sudo tee /etc/sysctl.d/k8s.conf
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/k8s.conf
+sudo sysctl --system
+
+# 此外，kubeadm 要求禁用 swap
+sudo swapoff -a
+sudo sed -i '/ swap / s/^/#/' /etc/fstab
+
+# 执行集群初始化 (如果在国内服务器，可以添加 --image-repository registry.aliyuncs.com/google_containers 加速拉取镜像)
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --image-repository registry.aliyuncs.com/google_containers
 
 # 4. 配置 kubectl 权限 (允许当前非 root 用户直接使用 kubectl)
 mkdir -p $HOME/.kube
