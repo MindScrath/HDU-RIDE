@@ -2,10 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
-import type { LectureChapter } from '../types'
+import type { ClassItem, LectureChapter } from '../types'
 
 const route = useRoute()
 const router = useRouter()
+const classes = ref<ClassItem[]>([])
 const chapters = ref<LectureChapter[]>([])
 const html = ref('')
 const classId = computed(() => String(route.params.classId ?? ''))
@@ -13,6 +14,13 @@ const basePath = computed(() => (classId.value ? `/classes/${classId.value}/lect
 const sections = computed(() => chapters.value.flatMap((chapter) => chapter.sections))
 const selected = computed(() => String(route.params.lectureId ?? sections.value[0]?.id ?? ''))
 const selectedSection = computed(() => sections.value.find((section) => section.id === selected.value))
+
+async function loadClasses() {
+  classes.value = (await api.get<{ classes: ClassItem[] }>('/api/classes')).classes
+  if (!classId.value && classes.value[0]) {
+    router.replace(`/classes/${classes.value[0].id}/lectures`)
+  }
+}
 
 async function loadLectures() {
   const path = classId.value ? `/api/classes/${classId.value}/lectures` : '/api/lectures'
@@ -28,6 +36,11 @@ async function loadLecture() {
   html.value = (await api.get<{ html: string }>(`${classId.value ? `/api/classes/${classId.value}` : '/api'}/lectures/${selected.value}`)).html
 }
 
+function switchClass(nextClassId: string) {
+  if (nextClassId) router.push(`/classes/${nextClassId}/lectures`)
+}
+
+watch(() => route.params.classId, loadClasses, { immediate: true })
 watch(classId, loadLectures, { immediate: true })
 watch(selected, loadLecture, { immediate: true })
 </script>
@@ -52,7 +65,12 @@ watch(selected, loadLecture, { immediate: true })
     </aside>
     <article class="panel scroll">
       <div class="panel-head">
-        <h2>{{ selectedSection?.title ?? '讲义' }}</h2>
+        <div>
+          <h2>{{ selectedSection?.title ?? '讲义' }}</h2>
+        </div>
+        <el-select v-if="classes.length" :model-value="classId" class="context-select" placeholder="选择班级" @change="switchClass">
+          <el-option v-for="klass in classes" :key="klass.id" :label="klass.name" :value="klass.id" />
+        </el-select>
       </div>
       <div class="markdown" v-html="html" />
     </article>

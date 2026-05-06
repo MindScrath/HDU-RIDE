@@ -79,7 +79,6 @@ const gridStyle = computed(() => ({
   '--assignment-ide-width': `${layout.ide}px`
 }))
 const filteredEntries = computed(() => {
-  if (isStudent.value) return entries.value
   return entries.value.filter((entry) => !classFilter.value || entry.classId === classFilter.value)
 })
 const reviewedCount = computed(() => latestRows.value.filter((row) => row.grade.score !== null).length)
@@ -109,7 +108,7 @@ async function loadAssignments() {
     })
   )
   entries.value = loaded.flat()
-  if (globalMode.value && !isStudent.value) classFilter.value = String(route.query.classId ?? '')
+  if (globalMode.value) classFilter.value = String(route.query.classId ?? '')
   const exists = entries.value.some(
     (entry) => entry.assignment.id === route.params.assignmentId && (!route.query.classId || entry.classId === route.query.classId)
   )
@@ -266,16 +265,28 @@ watch([selected, activeClassId, isStudent], loadAssignment, { immediate: true })
 watch(
   () => route.query.classId,
   (value) => {
-    if (globalMode.value && !isStudent.value) classFilter.value = String(value ?? '')
+    if (globalMode.value) classFilter.value = String(value ?? '')
   }
 )
+
+async function exportGrades() {
+  const blob = await api.download(`/api/classes/${activeClassId.value}/assignments/${selected.value}/grades/export?format=csv`)
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${selectedEntry.value?.className ?? 'class'}-${selected.value}-grades.csv`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
   <div ref="grid" class="assignment-grid" :style="gridStyle">
     <aside class="panel scroll assignment-list-panel">
       <div class="panel-head"><h3>作业</h3></div>
-      <div v-if="globalMode && !isStudent" class="assignment-filters">
+      <div v-if="globalMode" class="assignment-filters">
         <el-select v-model="classFilter" clearable placeholder="选择班级" @change="chooseClass">
           <el-option v-for="klass in classes" :key="klass.id" :label="klass.name" :value="klass.id" />
         </el-select>
@@ -322,6 +333,9 @@ watch(
       </div>
 
       <div v-else class="grading-overview">
+        <div class="grading-toolbar">
+          <el-button type="primary" plain @click="exportGrades">导出成绩 CSV</el-button>
+        </div>
         <div class="metric-row">
           <div><strong>{{ latestRows.length }}</strong><span>提交数</span></div>
           <div><strong>{{ pendingCount }}</strong><span>待批改</span></div>

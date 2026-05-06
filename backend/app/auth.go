@@ -116,8 +116,49 @@ func isAdmin(user User) bool {
 	return user.Role == RoleRoot || user.Role == RoleAdmin
 }
 
+func isValidRole(role Role) bool {
+	switch role {
+	case RoleRoot, RoleAdmin, RoleTeacher, RoleAssistant, RoleStudent:
+		return true
+	default:
+		return false
+	}
+}
+
 func canCreateClass(user User) bool {
 	return isAdmin(user) || user.Role == RoleTeacher
+}
+
+func canManageClass(ctx context.Context, db *pgxpool.Pool, user User, classID string) (bool, error) {
+	if isAdmin(user) {
+		return true, nil
+	}
+	if user.Role != RoleTeacher {
+		return false, nil
+	}
+	var exists bool
+	err := db.QueryRow(ctx, `select exists(select 1 from classes where id=$1 and created_by=$2)`, classID, user.ID).Scan(&exists)
+	return exists, err
+}
+
+func canManageTargetUser(actor, target User) bool {
+	if actor.Role == RoleRoot {
+		return true
+	}
+	if actor.Role != RoleAdmin {
+		return false
+	}
+	return target.Role != RoleRoot
+}
+
+func canAssignGlobalRole(actor User, role Role) bool {
+	if !isValidRole(role) {
+		return false
+	}
+	if actor.Role == RoleRoot {
+		return true
+	}
+	return actor.Role == RoleAdmin && role != RoleRoot
 }
 
 func canAccessClass(ctx context.Context, db *pgxpool.Pool, user User, classID string) (bool, error) {

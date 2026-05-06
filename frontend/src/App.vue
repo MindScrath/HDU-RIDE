@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { Document, Expand, Fold, Grid, Notebook, Setting, User } from '@element-plus/icons-vue'
 import { useSession } from './composables/useSession'
 
@@ -9,8 +10,10 @@ const router = useRouter()
 const session = useSession()
 
 const isLogin = computed(() => route.path === '/login')
-const classId = computed(() => String(route.params.classId ?? ''))
 const sidebarCollapsed = ref(window.innerWidth < 980)
+const passwordOpen = ref(false)
+const passwordSaving = ref(false)
+const passwordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
 const nav = computed(() => [
   { key: 'classes', label: '班级', path: '/classes', icon: Grid },
   { key: 'lectures', label: '讲义', path: '/lectures', icon: Notebook },
@@ -28,6 +31,24 @@ async function logout() {
   await session.logout()
   router.push('/login')
 }
+
+async function savePassword() {
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    ElMessage.error('两次输入的新密码不一致')
+    return
+  }
+  passwordSaving.value = true
+  try {
+    await session.changePassword(passwordForm.oldPassword, passwordForm.newPassword)
+    ElMessage.success('密码已修改')
+    passwordOpen.value = false
+    passwordForm.oldPassword = ''
+    passwordForm.newPassword = ''
+    passwordForm.confirmPassword = ''
+  } finally {
+    passwordSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -40,9 +61,6 @@ async function logout() {
           <strong>HDU RIDE</strong>
         </div>
       </div>
-      <el-select model-value="计量金融 2026 春" class="course-select" :show-arrow="true">
-        <el-option label="计量金融 2026 春" value="计量金融 2026 春" />
-      </el-select>
       <div class="topbar-actions">
         <el-dropdown v-if="session.state.user">
           <button class="user-button">
@@ -52,6 +70,7 @@ async function logout() {
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item>{{ session.state.user.role }}</el-dropdown-item>
+              <el-dropdown-item divided @click="passwordOpen = true">修改密码</el-dropdown-item>
               <el-dropdown-item divided @click="logout">退出</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -92,4 +111,22 @@ async function logout() {
     </main>
     </div>
   </div>
+
+  <el-dialog v-model="passwordOpen" title="修改密码" width="420px">
+    <el-form label-position="top">
+      <el-form-item label="当前密码">
+        <el-input v-model="passwordForm.oldPassword" type="password" autocomplete="current-password" show-password />
+      </el-form-item>
+      <el-form-item label="新密码">
+        <el-input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" show-password />
+      </el-form-item>
+      <el-form-item label="确认新密码">
+        <el-input v-model="passwordForm.confirmPassword" type="password" autocomplete="new-password" show-password />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="passwordOpen = false">取消</el-button>
+      <el-button type="primary" :loading="passwordSaving" @click="savePassword">保存</el-button>
+    </template>
+  </el-dialog>
 </template>

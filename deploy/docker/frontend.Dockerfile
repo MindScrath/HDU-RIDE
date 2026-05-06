@@ -1,5 +1,7 @@
 FROM oven/bun:1.3 AS build
 WORKDIR /src
+ARG BUN_CONFIG_REGISTRY=https://registry.npmmirror.com
+ENV BUN_CONFIG_REGISTRY=$BUN_CONFIG_REGISTRY
 COPY frontend/package.json frontend/bun.lock frontend/bunfig.toml ./
 RUN bun install --frozen-lockfile
 COPY frontend/index.html frontend/tsconfig.json frontend/tsconfig.node.json frontend/vite.config.ts ./

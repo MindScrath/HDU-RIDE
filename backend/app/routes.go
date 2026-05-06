@@ -38,13 +38,19 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api := router.Group("/api", requireSession(app.db, app.cfg))
 	api.GET("/session", app.session)
 	api.POST("/logout", app.logout)
+	api.PATCH("/me/password", app.changePassword)
 	api.GET("/lectures", app.listGlobalLectures)
 	api.GET("/lectures/:lectureID", app.getGlobalLecture)
 	api.GET("/classes", app.listClasses)
 	api.POST("/classes", app.createClass)
+	api.POST("/classes/bulk", app.bulkClasses)
 	api.GET("/classes/:classID", app.getClass)
+	api.DELETE("/classes/:classID", app.deleteClass)
 	api.GET("/classes/:classID/members", app.listMembers)
 	api.POST("/classes/:classID/members/import", app.importMembers)
+	api.POST("/classes/:classID/members/bulk", app.bulkMembers)
+	api.DELETE("/classes/:classID/members/:userID", app.removeMember)
+	api.POST("/classes/:classID/members/:userID/password", app.resetMemberPassword)
 	api.POST("/classes/:classID/assistants", app.assignAssistant)
 	api.GET("/classes/:classID/lectures", app.listLectures)
 	api.GET("/classes/:classID/lectures/:lectureID", app.getLecture)
@@ -52,6 +58,7 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api.GET("/classes/:classID/assignments/:assignmentID", app.getAssignment)
 	api.POST("/classes/:classID/assignments/:assignmentID/submit", app.submitAssignment)
 	api.GET("/classes/:classID/assignments/:assignmentID/submissions", app.listSubmissions)
+	api.GET("/classes/:classID/assignments/:assignmentID/grades/export", app.exportGrades)
 	api.POST("/classes/:classID/assignments/:assignmentID/workspace", app.startWorkspace)
 	api.GET("/submissions/:id", app.getSubmission)
 	api.GET("/submissions/:id/preview", app.previewSubmission)
@@ -63,7 +70,10 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api.POST("/workspaces/:id/heartbeat", app.heartbeatWorkspace)
 	api.GET("/admin/users", app.listUsers)
 	api.POST("/admin/users", app.createUser)
+	api.POST("/admin/users/bulk", app.bulkUsers)
 	api.PATCH("/admin/users/:id", app.updateUser)
+	api.DELETE("/admin/users/:id", app.deleteUser)
+	api.POST("/admin/users/:id/password", app.resetUserPassword)
 	api.POST("/admin/courses/import", app.importCourse)
 	api.POST("/admin/courses/reload", app.reloadCourses)
 
@@ -113,6 +123,38 @@ func (a *App) logout(c *gin.Context) {
 	token, _ := c.Cookie(sessionCookie)
 	deleteSession(c.Request.Context(), a.db, a.cfg, token)
 	clearSessionCookie(c)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) changePassword(c *gin.Context) {
+	user := currentUser(c)
+	var req struct {
+		OldPassword string `json:"oldPassword" binding:"required"`
+		NewPassword string `json:"newPassword" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.NewPassword) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid password request"})
+		return
+	}
+
+	var passwordHash string
+	err := a.db.QueryRow(c.Request.Context(), `select password_hash from users where id=$1 and status='active'`, user.ID).Scan(&passwordHash)
+	if err != nil || !checkPassword(passwordHash, req.OldPassword) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid old password"})
+		return
+	}
+	nextHash, err := hashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
+		return
+	}
+	if _, err := a.db.Exec(c.Request.Context(), `update users set password_hash=$1 where id=$2`, nextHash, user.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password update failed"})
+		return
+	}
+	token, _ := c.Cookie(sessionCookie)
+	_, _ = a.db.Exec(c.Request.Context(), `delete from sessions where user_id=$1 and token_hash<>$2`, user.ID, hashToken(a.cfg, token))
+	logEvent(c.Request.Context(), a.db, user.ID, "user.password.change", user.ID)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -180,6 +222,35 @@ insert into classes (id, course_id, name, term, note, created_by) values ($1,$2,
 	c.JSON(http.StatusCreated, gin.H{"id": classID})
 }
 
+func (a *App) bulkClasses(c *gin.Context) {
+	user := currentUser(c)
+	var req struct {
+		IDs    []string `json:"ids" binding:"required"`
+		Action string   `json:"action" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Action != "delete" || len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid class bulk request"})
+		return
+	}
+	deleted := 0
+	for _, classID := range uniqueStrings(req.IDs) {
+		if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		removed, err := a.deleteClassByID(c.Request.Context(), classID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "class delete failed"})
+			return
+		}
+		if removed {
+			deleted++
+			logEvent(c.Request.Context(), a.db, user.ID, "class.delete", classID)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": deleted})
+}
+
 func (a *App) getClass(c *gin.Context) {
 	classID := c.Param("classID")
 	if ok, err := canAccessClass(c.Request.Context(), a.db, currentUser(c), classID); err != nil || !ok {
@@ -196,6 +267,26 @@ select id, course_id, name, term, note, created_by, created_at from classes wher
 	}
 	course, _ := a.content.Course(item.CourseID)
 	c.JSON(http.StatusOK, gin.H{"class": item, "course": course})
+}
+
+func (a *App) deleteClass(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	deleted, err := a.deleteClassByID(c.Request.Context(), classID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "class delete failed"})
+		return
+	}
+	if !deleted {
+		c.JSON(http.StatusNotFound, gin.H{"error": "class not found"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "class.delete", classID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (a *App) listMembers(c *gin.Context) {
@@ -232,7 +323,7 @@ order by m.member_role, u.username
 func (a *App) importMembers(c *gin.Context) {
 	user := currentUser(c)
 	classID := c.Param("classID")
-	if ok, err := canGradeClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -248,12 +339,18 @@ func (a *App) importMembers(c *gin.Context) {
 			return
 		}
 		userID := uuid.NewString()
+		var role Role
 		err = a.db.QueryRow(c.Request.Context(), `
 insert into users (id, username, display_name, password_hash, role, status)
 values ($1,$2,$3,$4,'student','active')
-on conflict (username) do update set display_name=excluded.display_name, password_hash=excluded.password_hash, role='student', status='active'
-returning id
-`, userID, student.Username, student.DisplayName, hash).Scan(&userID)
+on conflict (username) do update set display_name=excluded.display_name, status='active'
+where users.role in ('student','assistant')
+returning id, role
+`, userID, student.Username, student.DisplayName, hash).Scan(&userID, &role)
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "member import only supports student or assistant accounts"})
+			return
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "student upsert failed"})
 			return
@@ -266,15 +363,138 @@ on conflict (class_id, user_id) do update set member_role='student'
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "member bind failed"})
 			return
 		}
+		if role == RoleAssistant {
+			if err := a.refreshAssistantRole(c.Request.Context(), userID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "assistant role refresh failed"})
+				return
+			}
+		}
 	}
 	logEvent(c.Request.Context(), a.db, user.ID, "class.members.import", classID)
 	c.JSON(http.StatusOK, gin.H{"imported": len(students)})
 }
 
+func (a *App) removeMember(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	userID := c.Param("userID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	removed, err := a.removeClassMember(c.Request.Context(), classID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "member remove failed"})
+		return
+	}
+	if !removed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "class.member.remove", classID+":"+userID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) bulkMembers(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		UserIDs    []string `json:"userIds" binding:"required"`
+		Action     string   `json:"action" binding:"required"`
+		MemberRole string   `json:"memberRole"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.UserIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid member bulk request"})
+		return
+	}
+
+	count := 0
+	switch req.Action {
+	case "remove":
+		for _, userID := range uniqueStrings(req.UserIDs) {
+			removed, err := a.removeClassMember(c.Request.Context(), classID, userID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "member remove failed"})
+				return
+			}
+			if removed {
+				count++
+			}
+		}
+	case "setMemberRole":
+		if req.MemberRole != "student" && req.MemberRole != "assistant" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid member role"})
+			return
+		}
+		for _, userID := range uniqueStrings(req.UserIDs) {
+			updated, err := a.setClassMemberRole(c.Request.Context(), classID, userID, req.MemberRole)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "member role update failed"})
+				return
+			}
+			if !updated {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "member role update not allowed"})
+				return
+			}
+			count++
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid member bulk action"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "class.members.bulk", classID+":"+req.Action)
+	c.JSON(http.StatusOK, gin.H{"updated": count})
+}
+
+func (a *App) resetMemberPassword(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	userID := c.Param("userID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Password) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid password request"})
+		return
+	}
+	var target User
+	err := a.db.QueryRow(c.Request.Context(), `
+select u.id, u.username, u.display_name, u.role, u.status, u.created_at
+from class_members m join users u on u.id=m.user_id
+where m.class_id=$1 and m.user_id=$2 and m.member_role='student'
+`, classID, userID).Scan(&target.ID, &target.Username, &target.DisplayName, &target.Role, &target.Status, &target.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "student member not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "member query failed"})
+		return
+	}
+	if target.Role != RoleStudent {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	if err := a.updateUserPassword(c.Request.Context(), userID, req.Password); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password reset failed"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "class.member.password.reset", classID+":"+userID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (a *App) assignAssistant(c *gin.Context) {
 	user := currentUser(c)
 	classID := c.Param("classID")
-	if ok, err := canGradeClass(c.Request.Context(), a.db, user, classID); err != nil || !ok || user.Role == RoleAssistant {
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -285,13 +505,13 @@ func (a *App) assignAssistant(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assistant request"})
 		return
 	}
-	_, err := a.db.Exec(c.Request.Context(), `
-update users set role='assistant' where id=$1;
-insert into class_members (class_id, user_id, member_role) values ($2,$1,'assistant')
-on conflict (class_id, user_id) do update set member_role='assistant'
-`, req.UserID, classID)
+	updated, err := a.setClassMemberRole(c.Request.Context(), classID, req.UserID, "assistant")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "assistant assign failed"})
+		return
+	}
+	if !updated {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "assistant assign not allowed"})
 		return
 	}
 	logEvent(c.Request.Context(), a.db, user.ID, "class.assistant.assign", classID)
@@ -481,6 +701,77 @@ order by s.created_at desc
 		items = append(items, gin.H{"submission": s, "studentName": displayName, "grade": gin.H{"id": nullString(gradeID), "score": nullFloat(score), "comment": nullString(comment), "publishedAt": nullTime(publishedAt)}})
 	}
 	c.JSON(http.StatusOK, gin.H{"submissions": items})
+}
+
+func (a *App) exportGrades(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	assignmentID := c.Param("assignmentID")
+	if c.Query("format") != "" && c.Query("format") != "csv" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported export format"})
+		return
+	}
+	if ok, err := canGradeClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	rows, err := a.db.Query(c.Request.Context(), `
+select u.username, u.display_name, s.id, s.attempt, s.late, s.created_at, g.score, g.comment, g.published_at
+from class_members m
+join users u on u.id=m.user_id
+left join lateral (
+  select id, attempt, late, created_at
+  from submissions
+  where class_id=m.class_id and assignment_id=$2 and user_id=u.id
+  order by attempt desc, created_at desc
+  limit 1
+) s on true
+left join grades g on g.submission_id=s.id
+where m.class_id=$1 and m.member_role='student'
+order by u.username
+`, classID, assignmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "grades export query failed"})
+		return
+	}
+	defer rows.Close()
+
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s-grades.csv"`, classID, assignmentID))
+	writer := csv.NewWriter(c.Writer)
+	_ = writer.Write([]string{"username", "displayName", "submissionId", "attempt", "late", "submittedAt", "score", "comment", "publishedAt"})
+	for rows.Next() {
+		var username, displayName string
+		var submissionID, comment sql.NullString
+		var attempt sql.NullInt64
+		var late sql.NullBool
+		var submittedAt, publishedAt sql.NullTime
+		var score sql.NullFloat64
+		if err := rows.Scan(&username, &displayName, &submissionID, &attempt, &late, &submittedAt, &score, &comment, &publishedAt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "grades export scan failed"})
+			return
+		}
+		_ = writer.Write([]string{
+			username,
+			displayName,
+			nullCSVString(submissionID),
+			nullCSVInt(attempt),
+			nullCSVBool(late),
+			nullCSVTime(submittedAt),
+			nullCSVFloat(score),
+			nullCSVString(comment),
+			nullCSVTime(publishedAt),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "grades export rows failed"})
+		return
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "grades export write failed"})
+		return
+	}
 }
 
 func (a *App) getSubmission(c *gin.Context) {
@@ -771,7 +1062,8 @@ func (a *App) listUsers(c *gin.Context) {
 }
 
 func (a *App) createUser(c *gin.Context) {
-	if !isAdmin(currentUser(c)) {
+	actor := currentUser(c)
+	if !isAdmin(actor) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -783,6 +1075,10 @@ func (a *App) createUser(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user request"})
+		return
+	}
+	if !canAssignGlobalRole(actor, req.Role) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
 	hash, err := hashPassword(req.Password)
@@ -801,8 +1097,91 @@ insert into users (id, username, display_name, password_hash, role, status) valu
 	c.JSON(http.StatusCreated, gin.H{"id": id})
 }
 
+func (a *App) bulkUsers(c *gin.Context) {
+	actor := currentUser(c)
+	if !isAdmin(actor) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		IDs    []string `json:"ids" binding:"required"`
+		Action string   `json:"action" binding:"required"`
+		Role   Role     `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user bulk request"})
+		return
+	}
+	if req.Action == "setRole" && !canAssignGlobalRole(actor, req.Role) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	updated := 0
+	for _, id := range uniqueStrings(req.IDs) {
+		target, ok, err := a.fetchUser(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "user query failed"})
+			return
+		}
+		if !ok {
+			continue
+		}
+		if !canManageTargetUser(actor, target) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		switch req.Action {
+		case "disable":
+			if target.ID == actor.ID {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot disable current user"})
+				return
+			}
+			if _, err := a.db.Exec(c.Request.Context(), `update users set status='disabled' where id=$1`, target.ID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "user bulk update failed"})
+				return
+			}
+			_, _ = a.db.Exec(c.Request.Context(), `delete from sessions where user_id=$1`, target.ID)
+		case "activate":
+			if _, err := a.db.Exec(c.Request.Context(), `update users set status='active' where id=$1`, target.ID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "user bulk update failed"})
+				return
+			}
+		case "setRole":
+			if target.ID == actor.ID {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot change current user role"})
+				return
+			}
+			if _, err := a.db.Exec(c.Request.Context(), `update users set role=$1 where id=$2`, req.Role, target.ID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "user bulk update failed"})
+				return
+			}
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user bulk action"})
+			return
+		}
+		updated++
+	}
+	logEvent(c.Request.Context(), a.db, actor.ID, "users.bulk", req.Action)
+	c.JSON(http.StatusOK, gin.H{"updated": updated})
+}
+
 func (a *App) updateUser(c *gin.Context) {
-	if !isAdmin(currentUser(c)) {
+	actor := currentUser(c)
+	if !isAdmin(actor) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	target, ok, err := a.fetchUser(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user query failed"})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if !canManageTargetUser(actor, target) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -817,22 +1196,115 @@ func (a *App) updateUser(c *gin.Context) {
 		return
 	}
 	if req.DisplayName != nil {
-		_, _ = a.db.Exec(c.Request.Context(), `update users set display_name=$1 where id=$2`, *req.DisplayName, c.Param("id"))
-	}
-	if req.Role != nil {
-		_, _ = a.db.Exec(c.Request.Context(), `update users set role=$1 where id=$2`, *req.Role, c.Param("id"))
-	}
-	if req.Status != nil {
-		_, _ = a.db.Exec(c.Request.Context(), `update users set status=$1 where id=$2`, *req.Status, c.Param("id"))
-	}
-	if req.Password != nil {
-		hash, err := hashPassword(*req.Password)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
+		if _, err := a.db.Exec(c.Request.Context(), `update users set display_name=$1 where id=$2`, strings.TrimSpace(*req.DisplayName), target.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "user update failed"})
 			return
 		}
-		_, _ = a.db.Exec(c.Request.Context(), `update users set password_hash=$1 where id=$2`, hash, c.Param("id"))
 	}
+	if req.Role != nil {
+		if target.ID == actor.ID && *req.Role != target.Role {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot change current user role"})
+			return
+		}
+		if !canAssignGlobalRole(actor, *req.Role) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		if _, err := a.db.Exec(c.Request.Context(), `update users set role=$1 where id=$2`, *req.Role, target.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "user update failed"})
+			return
+		}
+	}
+	if req.Status != nil {
+		if *req.Status != "active" && *req.Status != "disabled" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid status"})
+			return
+		}
+		if target.ID == actor.ID && *req.Status == "disabled" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot disable current user"})
+			return
+		}
+		if _, err := a.db.Exec(c.Request.Context(), `update users set status=$1 where id=$2`, *req.Status, target.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "user update failed"})
+			return
+		}
+		if *req.Status == "disabled" {
+			_, _ = a.db.Exec(c.Request.Context(), `delete from sessions where user_id=$1`, target.ID)
+		}
+	}
+	if req.Password != nil {
+		if err := a.updateUserPassword(c.Request.Context(), target.ID, *req.Password); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "password update failed"})
+			return
+		}
+	}
+	logEvent(c.Request.Context(), a.db, actor.ID, "user.update", target.ID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) deleteUser(c *gin.Context) {
+	actor := currentUser(c)
+	if !isAdmin(actor) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	target, ok, err := a.fetchUser(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user query failed"})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if target.ID == actor.ID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot disable current user"})
+		return
+	}
+	if !canManageTargetUser(actor, target) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	if _, err := a.db.Exec(c.Request.Context(), `update users set status='disabled' where id=$1`, target.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user disable failed"})
+		return
+	}
+	_, _ = a.db.Exec(c.Request.Context(), `delete from sessions where user_id=$1`, target.ID)
+	logEvent(c.Request.Context(), a.db, actor.ID, "user.disable", target.ID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) resetUserPassword(c *gin.Context) {
+	actor := currentUser(c)
+	if !isAdmin(actor) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	target, ok, err := a.fetchUser(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user query failed"})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if !canManageTargetUser(actor, target) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Password) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid password request"})
+		return
+	}
+	if err := a.updateUserPassword(c.Request.Context(), target.ID, req.Password); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password reset failed"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, actor.ID, "user.password.reset", target.ID)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -1027,6 +1499,163 @@ limit 1
 
 func workspaceObjects(workspace Workspace) WorkspaceObjects {
 	return WorkspaceObjects{PodName: workspace.PodName, ServiceName: workspace.ServiceName, PVCName: workspace.PVCName}
+}
+
+func (a *App) deleteClassByID(ctx context.Context, classID string) (bool, error) {
+	rows, err := a.db.Query(ctx, `
+select pod_name, service_name, pvc_name
+from workspaces
+where class_id=$1 and status <> 'stopped'
+`, classID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var objects WorkspaceObjects
+		if err := rows.Scan(&objects.PodName, &objects.ServiceName, &objects.PVCName); err != nil {
+			return false, err
+		}
+		a.workspaces.Stop(ctx, objects)
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	cmd, err := a.db.Exec(ctx, `delete from classes where id=$1`, classID)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
+func (a *App) removeClassMember(ctx context.Context, classID, userID string) (bool, error) {
+	cmd, err := a.db.Exec(ctx, `delete from class_members where class_id=$1 and user_id=$2`, classID, userID)
+	if err != nil {
+		return false, err
+	}
+	if err := a.refreshAssistantRole(ctx, userID); err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
+func (a *App) setClassMemberRole(ctx context.Context, classID, userID, memberRole string) (bool, error) {
+	var target User
+	err := a.db.QueryRow(ctx, `
+select u.id, u.username, u.display_name, u.role, u.status, u.created_at
+from class_members m join users u on u.id=m.user_id
+where m.class_id=$1 and m.user_id=$2
+`, classID, userID).Scan(&target.ID, &target.Username, &target.DisplayName, &target.Role, &target.Status, &target.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if target.Role != RoleStudent && target.Role != RoleAssistant {
+		return false, nil
+	}
+	if memberRole == "assistant" {
+		if _, err := a.db.Exec(ctx, `
+update class_members set member_role='assistant' where class_id=$1 and user_id=$2;
+update users set role='assistant' where id=$2 and role='student';
+`, classID, userID); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if memberRole == "student" {
+		if _, err := a.db.Exec(ctx, `update class_members set member_role='student' where class_id=$1 and user_id=$2`, classID, userID); err != nil {
+			return false, err
+		}
+		if err := a.refreshAssistantRole(ctx, userID); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (a *App) refreshAssistantRole(ctx context.Context, userID string) error {
+	_, err := a.db.Exec(ctx, `
+update users
+set role='student'
+where id=$1 and role='assistant'
+  and not exists(select 1 from class_members where user_id=$1 and member_role='assistant')
+`, userID)
+	return err
+}
+
+func (a *App) fetchUser(ctx context.Context, id string) (User, bool, error) {
+	var item User
+	err := a.db.QueryRow(ctx, `
+select id, username, display_name, role, status, created_at from users where id=$1
+`, id).Scan(&item.ID, &item.Username, &item.DisplayName, &item.Role, &item.Status, &item.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+func (a *App) updateUserPassword(ctx context.Context, userID, password string) error {
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	if _, err := a.db.Exec(ctx, `update users set password_hash=$1 where id=$2`, hash, userID); err != nil {
+		return err
+	}
+	_, _ = a.db.Exec(ctx, `delete from sessions where user_id=$1`, userID)
+	return nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func nullCSVString(value sql.NullString) string {
+	if value.Valid {
+		return value.String
+	}
+	return ""
+}
+
+func nullCSVFloat(value sql.NullFloat64) string {
+	if value.Valid {
+		return strconv.FormatFloat(value.Float64, 'f', -1, 64)
+	}
+	return ""
+}
+
+func nullCSVInt(value sql.NullInt64) string {
+	if value.Valid {
+		return strconv.FormatInt(value.Int64, 10)
+	}
+	return ""
+}
+
+func nullCSVBool(value sql.NullBool) string {
+	if value.Valid {
+		return strconv.FormatBool(value.Bool)
+	}
+	return ""
+}
+
+func nullCSVTime(value sql.NullTime) string {
+	if value.Valid {
+		return value.Time.Format(time.RFC3339)
+	}
+	return ""
 }
 
 func parseCSVLine(line string) []string {

@@ -36,5 +36,9 @@ export function useSession() {
     state.user = null
   }
 
-  return { state, signedIn, isAdmin, canTeach, fetchSession, login, logout }
+  async function changePassword(oldPassword: string, newPassword: string) {
+    await api.patch('/api/me/password', { oldPassword, newPassword })
+  }
+
+  return { state, signedIn, isAdmin, canTeach, fetchSession, login, logout, changePassword }
 }

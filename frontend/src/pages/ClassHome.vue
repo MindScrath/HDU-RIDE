@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { useSession } from '../composables/useSession'
 import type { ClassItem } from '../types'
@@ -9,8 +9,10 @@ import type { ClassItem } from '../types'
 const router = useRouter()
 const session = useSession()
 const classes = ref<ClassItem[]>([])
+const selectedRows = ref<ClassItem[]>([])
 const createOpen = ref(false)
 const form = reactive({ courseId: 'intro-r', name: '', term: '2026 春', note: '' })
+const canManageClasses = computed(() => ['root', 'admin', 'teacher'].includes(session.state.user?.role ?? ''))
 
 async function load() {
   try {
@@ -27,6 +29,15 @@ async function createClass() {
   await load()
 }
 
+async function deleteClasses(ids: string[]) {
+  if (!ids.length) return
+  await ElMessageBox.confirm(`确定删除 ${ids.length} 个班级？关联成员、提交和成绩会一并删除。`, '删除班级', { type: 'warning' })
+  await api.post('/api/classes/bulk', { action: 'delete', ids })
+  ElMessage.success('班级已删除')
+  selectedRows.value = []
+  await load()
+}
+
 onMounted(load)
 </script>
 
@@ -37,9 +48,15 @@ onMounted(load)
         <h2>班级</h2>
         <span class="muted">班级成员从这里进入，讲义和作业也可从左侧直接打开</span>
       </div>
-      <el-button v-if="session.canTeach.value" type="primary" @click="createOpen = true">新建班级</el-button>
+      <div class="toolbar-actions">
+        <el-button v-if="canManageClasses && selectedRows.length" type="danger" plain @click="deleteClasses(selectedRows.map((item) => item.id))">
+          删除选中
+        </el-button>
+        <el-button v-if="canManageClasses" type="primary" @click="createOpen = true">新建班级</el-button>
+      </div>
     </div>
-    <el-table :data="classes" style="width: 100%">
+    <el-table :data="classes" style="width: 100%" @selection-change="selectedRows = $event">
+      <el-table-column v-if="canManageClasses" type="selection" width="44" />
       <el-table-column prop="name" label="班级" min-width="180" />
       <el-table-column prop="courseId" label="课程 ID" width="150" />
       <el-table-column prop="term" label="学期" width="130" />
@@ -48,7 +65,8 @@ onMounted(load)
         <template #default="{ row }">
           <el-button @click="router.push(`/classes/${row.id}/lectures`)">讲义</el-button>
           <el-button type="primary" @click="router.push(`/classes/${row.id}/assignments`)">作业</el-button>
-          <el-button v-if="session.canTeach.value" @click="router.push(`/classes/${row.id}/members`)">成员</el-button>
+          <el-button v-if="canManageClasses || session.canTeach.value" @click="router.push(`/classes/${row.id}/members`)">成员</el-button>
+          <el-button v-if="canManageClasses" type="danger" plain @click="deleteClasses([row.id])">删除</el-button>
         </template>
       </el-table-column>
     </el-table>

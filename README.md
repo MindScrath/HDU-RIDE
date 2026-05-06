@@ -74,6 +74,14 @@ PODMAN_MACHINE_PROXY=http://172.23.128.1:9098 \
 sh scripts/podman-build-images.sh
 ```
 
+这些脚本现在只是跨平台 Go 运维入口的包装；Windows 可直接运行：
+
+```powershell
+scripts\rideops.ps1 build-images
+scripts\rideops.ps1 k8s-dev-up
+scripts\rideops.ps1 db-reset
+```
+
 在 Windows/WSL + Podman 的组合下使用 kind 时，镜像拉取会在 Podman VM 内进行；如果需要代理，代理地址要使用 VM 网关地址。下面的脚本会部署 Postgres、MinIO、后端 RBAC、content PVC、MinIO bucket 初始化、课程内容同步，并预载 workspace 镜像：
 
 ```sh

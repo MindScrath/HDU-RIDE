@@ -42,7 +42,7 @@ textarea {
 
 .global-topbar {
   display: grid;
-  grid-template-columns: 220px minmax(210px, 320px) minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   align-items: center;
   gap: 18px;
   height: 64px;
@@ -65,10 +65,6 @@ textarea {
   font-size: 24px;
   line-height: 1;
   letter-spacing: 0;
-}
-
-.course-select {
-  width: 100%;
 }
 
 .topbar-actions {
@@ -291,6 +287,18 @@ textarea {
   border-bottom: 1px solid #e7edf5;
 }
 
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.context-select {
+  width: min(260px, 42vw);
+}
+
 .panel-head h2,
 .panel-head h3 {
   margin: 0;
@@ -428,6 +436,12 @@ textarea {
   padding: 14px 18px 22px;
 }
 
+.grading-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
 .metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -535,6 +549,10 @@ textarea {
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 18px;
   padding: 18px;
+}
+
+.member-layout > .el-table:first-child {
+  grid-column: 1 / -1;
 }
 
 .member-import {

@@ -22,6 +22,12 @@ func main() {
 		fmt.Println(hash)
 		return
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "ops" {
+		if err := runOps(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	ctx := context.Background()
 	cfg, err := app.LoadConfig()

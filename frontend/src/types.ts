@@ -6,6 +6,7 @@ export interface User {
   displayName: string
   role: Role
   status: string
+  createdAt?: string
 }
 
 export interface ClassItem {
