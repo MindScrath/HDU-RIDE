@@ -16,7 +16,7 @@ spec:
       serviceAccountName: hdu-ride-backend
       containers:
         - name: backend
-          image: registry.example.edu/hdu-ride/backend:latest
+          image: hdu-ride-backend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

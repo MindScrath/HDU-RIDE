@@ -110,7 +110,7 @@ func (m *WorkspaceManager) Archive(ctx context.Context, objects WorkspaceObjects
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "rstudio",
-			Command:   []string{"tar", "-C", "/home/rstudio/workspace/" + assignmentID, "-czf", "-", "."},
+			Command:   []string{"sh", "-c", "tar -C /home/rstudio -czf - --exclude='./.cache' --exclude='./.local' --exclude='./.config' --exclude='./.rstudio' ."},
 			Stdout:    true,
 			Stderr:    true,
 		}, scheme.ParameterCodec)
@@ -130,8 +130,8 @@ func (m *WorkspaceManager) Restore(ctx context.Context, objects WorkspaceObjects
 	if m.restCfg == nil {
 		return fmt.Errorf("kubernetes rest config is required")
 	}
-	target := shellQuote("/home/rstudio/workspace/" + assignmentID)
-	command := fmt.Sprintf("set -eu; target=%s; rm -rf \"$target\"; mkdir -p \"$target\"; tar -xzf - -C \"$target\"; chown -R 1000:1000 \"$target\"", target)
+	target := shellQuote("/home/rstudio")
+	command := fmt.Sprintf("set -eu; target=%s; find \"$target\" -mindepth 1 -maxdepth 1 ! -name '.rstudio' ! -name '.local' ! -name '.cache' ! -name '.config' -exec rm -rf {} +; tar -xzf - -C \"$target\"; chown -R 1000:1000 \"$target\"", target)
 	req := m.client.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Namespace(m.cfg.K8sNamespace).
@@ -230,6 +230,7 @@ chown -R 1000:1000 /home/rstudio
 					{Name: "DISABLE_AUTH", Value: "true"},
 					{Name: "USERID", Value: "1000"},
 					{Name: "GROUPID", Value: "1000"},
+					{Name: "RUNROOTLESS", Value: "false"},
 				},
 				Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8787}},
 				Resources: corev1.ResourceRequirements{

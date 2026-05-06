@@ -81,7 +81,20 @@ $env:PORT_FORWARD="1"
 
 此脚本会将本地的 `content/` 目录打包并通过 `kubectl` 传输到名为 `hdu-ride-content-sync` 的 Pod 中，解压并覆盖到挂载了 PVC 的 `/content` 目录下，从而完成更新。
 
-## 6. 启动前端开发服务器
+## 6. 系统业务初始化与班级配置（重要！）
+
+由于系统业务逻辑的限制，学生必须被显式地加入到某一个“班级”中，才能查看到该班级的作业列表，并且**必须在作业列表中才能成功启动对应作业的 RStudio 工作区**。如果不进行班级配置，前端会遇到“打开 RStudio 无反应/报错”或作业列表为空的问题（因为前端会发送一个缺少 `classID` 的非法 403 请求）。
+
+**请在首次登录后，按以下步骤完成业务初始化：**
+
+1. 使用管理员/教师账号（例如 `root`）登录系统。
+2. 点击左侧导航栏的 **班级**，创建一个新班级（如：“计量金融 2026 春”），并绑定导入好的课程（如：`intro-r`）。
+3. 如果需要学生测试账号，可前往 **管理 -> 用户管理** 创建一个学生账号。
+4. 返回 **班级**，点击刚创建的班级，进入 **成员管理** 选项卡。
+5. 将创建好的学生账号导入/添加到该班级中。
+6. 使用学生账号重新登录，即可在 **作业** 菜单中正常查看作业列表，并成功创建和打开对应作业的 RStudio 工作区。
+
+## 7. 启动前端开发服务器
 
 新开一个 PowerShell 终端窗口，进入 `frontend` 目录并启动 Vite 开发服务器：
 
@@ -93,7 +106,38 @@ bun run dev
 
 启动成功后，Vite 会监听在 `http://localhost:5173`。
 
-## 7. 访问系统
+## 8. 后端代码修改与镜像更新
+如果对后端 Go 代码进行了二次开发，由于服务运行在本地 Kind 集群中，我们需要通过以下步骤将新代码打包为镜像并应用到集群中，否则修改不会生效：
+
+1. **构建后端镜像**：
+   在项目根目录运行，将后端编译并打包为 Docker 镜像：
+   ```powershell
+   podman build --no-cache -t localhost/hdu-ride/backend:dev -f deploy/docker/backend.Dockerfile .
+   ```
+2. **导出镜像为 tar 包**：
+   将镜像保存为本地文件，供 Kind 集群读取：
+   ```powershell
+   podman save -o backend-dev.tar localhost/hdu-ride/backend:dev
+   ```
+3. **将镜像加载到 Kind 集群**：
+   把导出的 tar 包导入到正在运行的 Kind 内部：
+   ```powershell
+   kind load image-archive backend-dev.tar --name hdu-ride
+   ```
+4. **更新并重启 Deployment**：
+   确保集群中的 Deployment 指向 `dev` 标签的镜像，并强制重启 Pod 以应用更新：
+   ```powershell
+   kubectl set image deployment/hdu-ride-backend -n hdu-ride backend=localhost/hdu-ride/backend:dev
+   kubectl rollout restart deployment/hdu-ride-backend -n hdu-ride
+   ```
+
+## 9. 常见问题排查与注意事项
+
+**1. 教师看不到学生在 RStudio 中提交的代码**
+- **原因**：Kubernetes 启动 `rocker/rstudio` 容器时（以 `uid=0` 和 `USERID=1000` 运行），镜像内置的 `cont-init.d/02_userconf` 脚本可能错误判断为 Rootless 模式，导致登录用户强制变为 `root`，工作目录变为 `/root`，而系统默认打包的是 `/home/rstudio`。
+- **解决**：在后端生成 Kubernetes Pod 的环境变量配置中（`backend/app/workspace.go`），必须显式注入环境变量 `RUNROOTLESS=false`。此修复目前已在代码库中生效。
+
+## 10. 访问系统
 
 在浏览器中打开：[http://localhost:5173/](http://localhost:5173/)
 
