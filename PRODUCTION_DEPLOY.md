@@ -70,9 +70,16 @@ sudo k3s ctr images import frontend.tar
 首先准备环境秘钥：
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，填入或确认您的密码和密钥，特别是 ROOT_PASSWORD_HASH
+nano .env
 ```
-> 如果您没有在服务器上安装 Go 环境，可以在本地生成 `ROOT_PASSWORD_HASH`（如 `$2a$10$...`）然后直接粘贴进云服务器的 `.env` 中。
+> **`.env` 文件编辑指南**：
+> 打开 `.env` 文件后，由于这是生产环境，您**必须**修改以下几项关键配置，以保证系统安全：
+> 1. `POSTGRES_PASSWORD`: 修改为一个复杂的数据库密码。
+> 2. `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`: 修改为 MinIO (对象存储) 的复杂账号密码。
+> 3. `SESSION_SECRET`: 随意输入一段长且复杂的随机英文字符串（用于加密 Cookie）。
+> 4. `ROOT_PASSWORD`: 设定您超级管理员 `root` 的登录密码（比如：`Admin@2026`）。
+> 5. `ROOT_PASSWORD_HASH`: **这是最重要的一步！** 后端不能直接存明文密码，您需要在**本地电脑**（装有 Go 环境的地方）进入项目的 `backend` 目录，执行 `go run . hash-password 您的密码`，它会输出一串类似 `$2a$10$xxxx` 的字符。将这串字符复制，填写到服务器 `.env` 的 `ROOT_PASSWORD_HASH=` 后面。
+> 6. `WORKSPACE_STORAGE_CLASS`: 确保其值为 `local-path` (K3s 的默认存储类)，以支持本地磁盘分配。
 
 为了方便一键启动生产服务，我们在 `scripts/` 下提供了一个生产部署脚本 `k8s-prod-up.sh`。可以直接执行，它会读取 `.env` 并创建所有 K8s 资源：
 
