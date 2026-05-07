@@ -13,7 +13,7 @@ func TestWorkspaceManagerCreateObjects(t *testing.T) {
 	cfg := Config{
 		K8sNamespace:          "hdu-ride",
 		ContentPVCName:        "hdu-ride-content",
-		WorkspaceStorageClass: "standard",
+		WorkspaceStorageClass: "local-path",
 		WorkspaceCPURequest:   "500m",
 		WorkspaceCPULimit:     "1",
 		WorkspaceMemRequest:   "1Gi",
@@ -36,8 +36,15 @@ func TestWorkspaceManagerCreateObjects(t *testing.T) {
 	if len(pod.Spec.InitContainers) != 1 || !strings.Contains(strings.Join(pod.Spec.InitContainers[0].Command, " "), "tests/public") {
 		t.Fatalf("assignment seed init container missing public files: %+v", pod.Spec.InitContainers)
 	}
-	if strings.Contains(strings.Join(pod.Spec.InitContainers[0].Command, " "), "tests/hidden") {
+	script := strings.Join(pod.Spec.InitContainers[0].Command, " ")
+	if strings.Contains(script, "tests/hidden") {
 		t.Fatal("hidden tests must not be copied into workspace")
+	}
+	if !strings.Contains(script, `if [ -f "$assignment_root/README.md" ]; then`) {
+		t.Fatal("workspace seed should tolerate missing README.md")
+	}
+	if !strings.Contains(script, "Assignment content is incomplete") {
+		t.Fatal("workspace seed should create a placeholder README when course content is incomplete")
 	}
 	if got := pod.Spec.Containers[0].Env[0].Name + "=" + pod.Spec.Containers[0].Env[0].Value; got != "DISABLE_AUTH=true" {
 		t.Fatalf("unexpected auth env: %s", got)

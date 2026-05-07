@@ -1,102 +1,133 @@
-# HDU RIDE 本地部署与启动指南
+# HDU RIDE Windows 本地开发指南
 
-本文档记录了在 Windows 系统下，通过 Podman + kind (Kubernetes) 运行本项目的完整且正确的步骤。
+本文档只面向 Windows 本地开发环境，目标是通过 `Podman + kind + Vite` 跑起项目并进行日常调试。
 
-## 1. 环境准备
+如果您要在 Ubuntu 云主机上做正式部署，请直接看 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md)。
 
-确保您已安装并配置好以下工具：
-- **Podman** 及 Podman Desktop (用于替代 Docker)
-- **kind** (Kubernetes in Docker)
-- **kubectl** (Kubernetes 命令行工具)
-- **Bun** (前端包管理与运行工具)
-- **Git Bash** 或其他兼容的 sh 环境 (Windows 环境下执行 `.sh` 脚本必需)
+## 1. 适用范围
 
-在开始前，请启动 Podman 虚拟机：
+本文档适用于以下场景：
+
+- 在 Windows 上本地开发后端、前端
+- 使用 kind 提供本地 Kubernetes 集群
+- 使用 Podman 构建并预载镜像
+- 使用 Vite 启动前端开发服务器
+
+本文档不再记录生产环境发布、Nginx、域名、HTTPS 或单节点 Kubernetes 运维，这些内容已统一迁移到 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md)。
+
+## 2. 环境准备
+
+请先安装：
+
+- Podman
+- kind
+- kubectl
+- Go
+- Bun
+
+Windows 下推荐优先使用 PowerShell 配合仓库内的 `scripts\rideops.ps1`。如果您更习惯 `sh`，也可以继续使用 `scripts/*.sh` 包装脚本，但当前仓库的核心逻辑已经统一走 `go run . ops ...`。
+
+启动 Podman 虚拟机：
+
 ```powershell
 podman machine start
 ```
 
-如果还没有创建 kind 集群，请创建一个（例如命名为 `hdu-ride`）：
+如果还没有 kind 集群，请创建一个：
+
 ```powershell
 kind create cluster --name hdu-ride
 ```
 
-确保 `kubectl config current-context` 指向正确的集群。
+确认当前上下文正确：
 
-## 2. 后端环境变量配置
+```powershell
+kubectl config current-context
+```
 
-项目后端会在集群中运行，首先需要准备本地环境变量配置，并生成默认 root 账号的密码 Hash：
+## 3. 准备 `.env`
 
-1. 从模板复制 `.env`：
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+从模板复制配置：
 
-2. 生成 `root` 用户的密码 Hash：
-   ```powershell
-   cd backend
-   go run . hash-password root123456
-   cd ..
-   ```
+```powershell
+Copy-Item .env.example .env
+```
 
-3. 修改根目录下的 `.env` 文件，将生成的 Hash 填入 `ROOT_PASSWORD_HASH` 中，并将 `ROOT_PASSWORD` 改为 `root123456`：
-   ```env
-   ROOT_PASSWORD=root123456
-   ROOT_PASSWORD_HASH=$2a$10$... (替换为您生成的 Hash)
-   ```
+生成 root 默认密码哈希：
 
-## 3. Windows 下路径转换问题修复
+```powershell
+cd backend
+go run . hash-password root123456
+cd ..
+```
 
-由于 Windows 上的 Git Bash (MSYS) 会将 `/content` 这样的路径自动转换为 Windows 路径（如 `C:/Program Files/Git/content`），从而导致 `k8s-sync-content.sh` 脚本在使用 `kubectl exec` 挂载目录时出现 `tar: can't change directory` 错误。
+把输出填入根目录 `.env` 的 `ROOT_PASSWORD_HASH`，并确认：
 
-我们在 `scripts/k8s-sync-content.sh` 中为相关 `kubectl` 命令添加了 `MSYS_NO_PATHCONV=1` 前缀以禁止自动路径转换：
+```env
+ROOT_USERNAME=root
+ROOT_PASSWORD=root123456
+ROOT_PASSWORD_HASH=$2a$10$... 
+```
+
+## 4. 构建本地开发镜像
+
+推荐直接使用 PowerShell 包装入口：
+
+```powershell
+$env:TAG="dev"
+$env:PREFIX="localhost/hdu-ride"
+$env:PODMAN_MACHINE_PROXY="http://172.23.128.1:9098"
+scripts\rideops.ps1 build-images
+```
+
+如果您不用代理，可以省略 `PODMAN_MACHINE_PROXY`。
+
+这一步会：
+
+- 预拉取后端、前端、RStudio 所需基础镜像
+- 构建本地开发镜像
+- 生成：
+  - `localhost/hdu-ride/backend:dev`
+  - `localhost/hdu-ride/frontend:dev`
+  - `localhost/hdu-ride/rstudio:dev`
+
+## 5. 部署开发环境到 kind
+
+执行：
+
+```powershell
+scripts\rideops.ps1 k8s-dev-up
+```
+
+或：
+
 ```sh
-MSYS_NO_PATHCONV=1 kubectl exec -n "$NAMESPACE" hdu-ride-content-sync -- sh -c "rm -rf /content/*"
-tar -C "$CONTENT_DIR" -cf - . | MSYS_NO_PATHCONV=1 kubectl exec -i -n "$NAMESPACE" hdu-ride-content-sync -- tar -C /content -xf -
+sh scripts/k8s-dev-up.sh
 ```
-此修复已包含在当前代码库中。
 
-## 4. 部署后端及依赖服务到 Kubernetes
+当前 `k8s-dev-up` 的实际行为是：
 
-通过 Git Bash 的 `sh` 执行官方提供的部署脚本。该脚本会自动部署 Postgres、MinIO、初始化存储桶、同步课程内容，并将后端部署到集群中，最后开启本地端口转发。
+- 部署 PostgreSQL
+- 部署 MinIO
+- 初始化 bucket
+- 创建/更新内容 PVC
+- 将本地 `content/` 同步到集群
+- 部署后端
+- 设置后端镜像并等待 rollout 完成
 
-在 PowerShell 中执行以下命令（注意需要指定 Git Bash 的 sh 路径，否则 Windows 默认无法执行 `.sh`）：
+注意：它**不会自动执行 `kubectl port-forward`**。
+
+如果您要让本机 Vite 开发服务器访问集群里的后端，请另开一个终端手工执行：
 
 ```powershell
-$env:PORT_FORWARD="1"
-& "C:\Program Files\Git\bin\sh.exe" scripts/k8s-dev-up.sh
+kubectl port-forward -n hdu-ride svc/hdu-ride-backend 8080:8080
 ```
 
-此命令将阻塞终端，并保持 `8080` 端口的转发（`kubectl port-forward -n hdu-ride svc/hdu-ride-backend 8080:8080`）。请**保持此终端窗口打开**。
+这个终端需要保持打开。
 
-## 5. 课程内容的更新与同步
+## 6. 启动前端开发服务器
 
-如果您修改了 `content/` 目录下的 Markdown、YAML 课程配置文件，或添加了新的作业，需要将它们同步到 Kubernetes 集群中（因为后端读取的是集群 PVC 中的文件）。
-
-您可以单独运行专门的同步脚本：
-
-```powershell
-& "C:\Program Files\Git\bin\sh.exe" scripts/k8s-sync-content.sh
-```
-
-此脚本会将本地的 `content/` 目录打包并通过 `kubectl` 传输到名为 `hdu-ride-content-sync` 的 Pod 中，解压并覆盖到挂载了 PVC 的 `/content` 目录下，从而完成更新。
-
-## 6. 系统业务初始化与班级配置（重要！）
-
-由于系统业务逻辑的限制，学生必须被显式地加入到某一个“班级”中，才能查看到该班级的作业列表，并且**必须在作业列表中才能成功启动对应作业的 RStudio 工作区**。如果不进行班级配置，前端会遇到“打开 RStudio 无反应/报错”或作业列表为空的问题（因为前端会发送一个缺少 `classID` 的非法 403 请求）。
-
-**请在首次登录后，按以下步骤完成业务初始化：**
-
-1. 使用管理员/教师账号（例如 `root`）登录系统。
-2. 点击左侧导航栏的 **班级**，创建一个新班级（如：“计量金融 2026 春”），并绑定导入好的课程（如：`intro-r`）。
-3. 如果需要学生测试账号，可前往 **管理 -> 用户管理** 创建一个学生账号。
-4. 返回 **班级**，点击刚创建的班级，进入 **成员管理** 选项卡。
-5. 将创建好的学生账号导入/添加到该班级中。
-6. 使用学生账号重新登录，即可在 **作业** 菜单中正常查看作业列表，并成功创建和打开对应作业的 RStudio 工作区。
-
-## 7. 启动前端开发服务器
-
-新开一个 PowerShell 终端窗口，进入 `frontend` 目录并启动 Vite 开发服务器：
+再开一个终端：
 
 ```powershell
 cd frontend
@@ -104,50 +135,90 @@ bun install
 bun run dev
 ```
 
-启动成功后，Vite 会监听在 `http://localhost:5173`。
+Vite 默认监听：
 
-## 8. 后端代码修改与镜像更新
-如果对后端 Go 代码进行了二次开发，由于服务运行在本地 Kind 集群中，我们需要通过以下步骤将新代码打包为镜像并应用到集群中，否则修改不会生效：
+- `http://127.0.0.1:5173`
 
-1. **构建后端镜像**：
-   在项目根目录运行，将后端编译并打包为 Docker 镜像：
-   ```powershell
-   podman build --no-cache -t localhost/hdu-ride/backend:dev -f deploy/docker/backend.Dockerfile .
-   ```
-2. **导出镜像为 tar 包**：
-   将镜像保存为本地文件，供 Kind 集群读取：
-   ```powershell
-   podman save -o backend-dev.tar localhost/hdu-ride/backend:dev
-   ```
-3. **将镜像加载到 Kind 集群**：
-   把导出的 tar 包导入到正在运行的 Kind 内部：
-   ```powershell
-   kind load image-archive backend-dev.tar --name hdu-ride
-   ```
-4. **更新并重启 Deployment**：
-   确保集群中的 Deployment 指向 `dev` 标签的镜像，并强制重启 Pod 以应用更新：
-   ```powershell
-   kubectl set image deployment/hdu-ride-backend -n hdu-ride backend=localhost/hdu-ride/backend:dev
-   kubectl rollout restart deployment/hdu-ride-backend -n hdu-ride
-   ```
+当前前端开发代理会把 `/api` 和 `/ide` 转发到：
 
-## 9. 常见问题排查与注意事项
+- `http://127.0.0.1:8080`
 
-**1. 教师看不到学生在 RStudio 中提交的代码**
-- **原因**：Kubernetes 启动 `rocker/rstudio` 容器时（以 `uid=0` 和 `USERID=1000` 运行），镜像内置的 `cont-init.d/02_userconf` 脚本可能错误判断为 Rootless 模式，导致登录用户强制变为 `root`，工作目录变为 `/root`，而系统默认打包的是 `/home/rstudio`。
-- **解决**：在后端生成 Kubernetes Pod 的环境变量配置中（`backend/app/workspace.go`），必须显式注入环境变量 `RUNROOTLESS=false`。此修复目前已在代码库中生效。
+所以如果没有上一节的 `kubectl port-forward`，前端登录和 RStudio 代理都不会通。
 
-## 10. 访问系统
+## 7. 更新课程内容
 
-在浏览器中打开：[http://localhost:5173/](http://localhost:5173/)
+本地开发模式下，后端读取的是集群里的内容 PVC，而不是直接读取 Windows 文件系统。
 
-**默认测试账号**：
-- 用户名：`root`
-- 密码：`root123456` (或您在 `.env` 中设置的其他密码)
+如果您修改了 `content/` 下的课程 YAML、讲义或作业内容，请重新执行：
 
----
-**附注：关于数据库重置**
-如果遇到更改了 `.env` 中的密码但仍无法登录的情况，通常是因为 Postgres 数据库是之前遗留的，而后端初始化时使用了 `ON CONFLICT DO NOTHING`。此时您可以通过以下命令进入 Postgres 手动更新密码：
 ```powershell
-kubectl exec -it postgres-0 -n hdu-ride -- psql -U hdu -d hdu_ride -c "UPDATE users SET password_hash = '\$2a\$10\$...' WHERE username = 'root';"
+scripts\rideops.ps1 sync-content
 ```
+
+或：
+
+```sh
+sh scripts/k8s-sync-content.sh
+```
+
+说明：
+
+- 现在 `k8s-sync-content.sh` 只是 Go 运维入口包装
+- 实际同步逻辑在 `backend/ops.go` 的 `ops sync-content`
+- 旧版文档里关于在 shell 中手工拼接 `MSYS_NO_PATHCONV=1 kubectl exec ...` 的说明已经不再适用
+
+## 8. 业务初始化
+
+首次登录后，请先完成业务初始化，否则学生端会出现“作业列表为空”或“打开 RStudio 无反应”的现象。
+
+必要步骤：
+
+1. 使用管理员账号 `root` 登录
+2. 创建班级并绑定课程
+3. 创建学生账号
+4. 将学生加入班级
+
+如果学生没有被加入班级：
+
+- 前端拿不到有效 `classID`
+- 学生看不到作业
+- 打开作业工作区时可能出现 403 或无反应
+
+## 9. 修改代码后的更新方式
+
+如果您修改了后端、前端或 RStudio 镜像构建内容，推荐直接重新走统一入口，而不是手工 `podman save` + `kind load`：
+
+```powershell
+scripts\rideops.ps1 build-images
+scripts\rideops.ps1 k8s-dev-up
+```
+
+这样更符合当前仓库结构，也比旧文档中的手工流程更不容易漏步骤。
+
+## 10. 常见问题
+
+### 10.1 教师看不到学生保存在 home 根目录的文件
+
+当前代码已经把提交归档与批阅恢复范围扩展到 `/home/rstudio`，不再只限于 `workspace/<assignmentID>` 子目录。
+
+### 10.2 RStudio 打开后落在 `/root`
+
+当前代码已经在工作区 Pod 环境变量中显式设置 `RUNROOTLESS=false`，用于避免 `rocker/rstudio` 在 Kubernetes 中误判为 rootless 模式。
+
+### 10.3 修改 `content/` 后页面没变化
+
+这通常不是同步失败，而是后端仍持有旧的内存课程数据。开发环境中建议：
+
+1. 先执行 `scripts\rideops.ps1 sync-content`
+2. 再重启后端或重新触发课程重载
+
+## 11. 访问方式
+
+浏览器访问：
+
+- `http://127.0.0.1:5173`
+
+默认开发账号：
+
+- 用户名：`root`
+- 密码：`root123456`

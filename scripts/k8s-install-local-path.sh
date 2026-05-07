@@ -36,8 +36,8 @@ pull_and_import "$LOCAL_PATH_HELPER_PULL_IMAGE" "$LOCAL_PATH_HELPER_IMAGE" "loca
 
 kubectl apply -f "$MANIFEST"
 untaint_single_node
-kubectl delete storageclass standard --ignore-not-found
 kubectl delete storageclass local-path --ignore-not-found
+kubectl delete storageclass standard --ignore-not-found
 kubectl apply -f "$SC_MANIFEST"
 kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=180s
 kubectl get storageclass

@@ -7,7 +7,7 @@ spec:
     storage: 20Gi
   accessModes:
     - ReadWriteOnce
-  storageClassName: standard
+  storageClassName: ""
   hostPath:
     path: /opt/hdu-ride/content
 ---
@@ -19,7 +19,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: standard
+  storageClassName: ""
   resources:
     requests:
       storage: 20Gi

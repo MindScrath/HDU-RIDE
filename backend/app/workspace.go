@@ -59,6 +59,7 @@ func NewWorkspaceManager(cfg Config) (*WorkspaceManager, error) {
 func (m *WorkspaceManager) Create(ctx context.Context, id, userID, courseID, assignmentID, image string) (WorkspaceObjects, error) {
 	name := "rstudio-" + safeName(id)
 	pvcName := "home-" + safeName(id)
+	objects := WorkspaceObjects{PodName: name, ServiceName: name, PVCName: pvcName}
 	labels := map[string]string{
 		"app.kubernetes.io/name":       "hdu-ride-rstudio",
 		"app.kubernetes.io/managed-by": "hdu-ride",
@@ -70,15 +71,18 @@ func (m *WorkspaceManager) Create(ctx context.Context, id, userID, courseID, ass
 		return WorkspaceObjects{}, err
 	}
 	if _, err := m.client.CoreV1().Pods(m.cfg.K8sNamespace).Create(ctx, m.pod(name, pvcName, labels, courseID, assignmentID, image), metav1.CreateOptions{}); err != nil {
+		m.Stop(ctx, objects)
 		return WorkspaceObjects{}, err
 	}
 	if _, err := m.client.CoreV1().Services(m.cfg.K8sNamespace).Create(ctx, m.service(name, labels), metav1.CreateOptions{}); err != nil {
+		m.Stop(ctx, objects)
 		return WorkspaceObjects{}, err
 	}
 	if _, err := m.client.NetworkingV1().NetworkPolicies(m.cfg.K8sNamespace).Create(ctx, m.networkPolicy(name, labels), metav1.CreateOptions{}); err != nil {
+		m.Stop(ctx, objects)
 		return WorkspaceObjects{}, err
 	}
-	return WorkspaceObjects{PodName: name, ServiceName: name, PVCName: pvcName}, nil
+	return objects, nil
 }
 
 func (m *WorkspaceManager) Stop(ctx context.Context, objects WorkspaceObjects) {
@@ -194,16 +198,23 @@ func (m *WorkspaceManager) pod(name, pvcName string, labels map[string]string, c
 	copyScript := fmt.Sprintf(`
 set -eu
 target="/home/rstudio/workspace/%s"
+assignment_root="/content/courses/%s/assignments/%s"
 mkdir -p "$target"
-cp "/content/courses/%s/assignments/%s/README.md" "$target/README.md"
+if [ -f "$assignment_root/README.md" ]; then
+  cp "$assignment_root/README.md" "$target/README.md"
+else
+  cat > "$target/README.md" <<'EOF'
+Assignment content is incomplete: README.md is missing from the course package.
+EOF
+fi
 for d in starter data/public tests/public; do
-  if [ -d "/content/courses/%s/assignments/%s/$d" ]; then
+  if [ -d "$assignment_root/$d" ]; then
     mkdir -p "$target/$d"
-    cp -R "/content/courses/%s/assignments/%s/$d/." "$target/$d/"
+    cp -R "$assignment_root/$d/." "$target/$d/"
   fi
 done
 chown -R 1000:1000 /home/rstudio
-`, assignmentID, courseID, assignmentID, courseID, assignmentID, courseID, assignmentID)
+`, assignmentID, courseID, assignmentID)
 
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},

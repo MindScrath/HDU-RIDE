@@ -87,8 +87,13 @@ scripts\rideops.ps1 db-reset
 ```sh
 BACKEND_IMAGE=localhost/hdu-ride/backend:dev \
 PODMAN_MACHINE_PROXY=http://172.23.128.1:9098 \
-PORT_FORWARD=1 \
 sh scripts/k8s-dev-up.sh
+```
+
+注意：当前 `scripts/k8s-dev-up.sh` 只负责把后端及依赖部署到 kind 集群，不会自动执行 `kubectl port-forward`。如果你要在本机用 Vite 开发服务器访问后端，需要再手工开一个终端执行：
+
+```powershell
+kubectl port-forward -n hdu-ride svc/hdu-ride-backend 8080:8080
 ```
 
 在另一个终端启动前端：
@@ -111,3 +116,14 @@ assignments/
 ```
 
 `course.yml` 会分别列出“讲义章节”与“非章节作业”。隐藏测试放在 `tests/hidden` 下，不会被复制到 RStudio 工作空间中。
+
+## 生产排障
+
+如果你是在 Ubuntu 云主机上部署生产环境，出现了 Pod Pending、RStudio 打不开、教师批阅失败、后端 500 或网关 502 等问题，可以直接运行：
+
+```bash
+cd /opt/hdu-ride
+bash scripts/k8s-prod-check.sh
+```
+
+它会生成一份适合贴给 AI 协助排障的诊断报告。更完整的使用说明见 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md)。

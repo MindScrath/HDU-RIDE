@@ -409,17 +409,18 @@ kubectl get pods -n kube-system
 
 - [storageclasses-single-node.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/storageclasses-single-node.yml)
 
-这里做了两件关键事情：
+这里采用更接近工业实践的做法：
 
-1. 把 `local-path` 的 `volumeBindingMode` 强制改成 `Immediate`
-2. 创建 `standard` 别名，同样指向 `rancher.io/local-path`，并且同样使用 `Immediate`
+1. 单节点环境只保留一个动态 `StorageClass`：`local-path`
+2. `local-path` 被设为默认类
+3. `volumeBindingMode` 保持为 `WaitForFirstConsumer`
 
-这意味着以下几处天然保持一致：
+这样做的原因是：
 
-1. 仓库中的 YAML 清单
-2. 安装脚本预拉取与导入的镜像
-3. 集群运行时引用的镜像
-4. 单节点环境里实际使用的 `StorageClass` 绑定策略
+- `local-path-provisioner` 为本地盘动态供给卷时，需要结合调度节点信息
+- 把它强行改成 `Immediate` 容易触发 `no node was specified`
+- 单节点环境真正应该解的是节点污点，而不是把 `volumeBindingMode` 改坏
+- 静态内容卷不应该和动态工作区卷共用一套绑定逻辑
 
 ### 7.2 一键安装 local-path-provisioner
 
@@ -437,10 +438,12 @@ bash scripts/k8s-install-local-path.sh
 3. 导入 `containerd`
 4. 强制移除单节点常见的 `control-plane/master` 调度污点
 5. 应用仓库中的固定版本 provisioner YAML
-6. 删除并重建 `local-path` 与 `standard` 两个 `StorageClass`
-7. 将两者的 `volumeBindingMode` 固定为 `Immediate`
-8. 把 `standard` 设为默认 `StorageClass`
+6. 删除并重建 `local-path` 这个动态 `StorageClass`
+7. 将 `local-path` 设为默认 `StorageClass`
+8. 保持 `volumeBindingMode=WaitForFirstConsumer`
 9. 等待 `local-path-provisioner` 就绪
+
+虽然下面的生产部署脚本 `scripts/k8s-prod-up.sh` 现在也会在检测到 `local-path` 缺失时自动调用这个安装脚本，但第一次在新机器上部署时，仍然建议你先单独执行一次。这样可以把 Kubernetes 基础设施问题尽早暴露出来，而不是等到业务部署阶段再混在一起排查。
 
 如果你所在环境只能从镜像代理拉取，也不需要手工改 YAML，只要这样执行：
 
@@ -460,9 +463,8 @@ kubectl get storageclass
 你应该能看到：
 
 - `local-path`
-- `standard`
-- 其中 `standard` 带有 `(default)` 标记
-- 两者的 `VOLUMEBINDINGMODE` 都应为 `Immediate`
+- 它带有 `(default)` 标记
+- `VOLUMEBINDINGMODE` 应为 `WaitForFirstConsumer`
 
 ---
 
@@ -502,14 +504,26 @@ git pull
 虽然 `PersistentVolume` 自身是集群级资源，不属于某个命名空间，但它要绑定的 `PersistentVolumeClaim` 是创建在 `hdu-ride` 命名空间中的。因此在生产环境里，手动创建静态 PV 作为内容卷时，必须同时保证下面两件事：
 
 1. `PersistentVolumeClaim` 的命名空间正确，是 `hdu-ride`
-2. 静态 PV 与静态 PVC 的 `storageClassName` 和集群默认动态存储类保持一致，例如本文档默认的 `standard`
+2. 静态 PV 与静态 PVC 自身的属性严格一致，例如 `storageClassName`、`capacity`、`accessModes`
 
 如果这里不一致，Kubernetes 会因为 `VolumeMismatch` 拒绝绑定，最终表现为：
 
 - `hdu-ride-content` 一直无法绑定
 - 后端 Pod 因挂载内容卷失败而长期处于 `Pending`
 
-当前仓库已经在 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中把内容卷的 `storageClassName` 默认固定为 `standard`。如果你修改了 `.env` 中的 `WORKSPACE_STORAGE_CLASS`，请同步更新这个文件中的 `storageClassName`，否则会因为 `VolumeMismatch` 无法绑定。生产脚本 [k8s-prod-up.sh](file:///d:/Go/HDU-RIDE/scripts/k8s-prod-up.sh) 会在正式部署前做这类一致性检查；如果发现集群里已经存在属性不一致的静态 PV/PVC，还会先删除旧对象再继续 `apply`。
+当前仓库已经在 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中把内容卷设计成“静态精确绑定”：
+
+- PV 使用 `hostPath`
+- PVC 通过 `volumeName: hdu-ride-content-pv` 精确指向该 PV
+- PV/PVC 的 `storageClassName` 都固定为 `""`
+
+这意味着：
+
+- 内容卷不会走动态供给
+- 内容卷不会再依赖 `WORKSPACE_STORAGE_CLASS`
+- 你修改 `.env` 中的 `WORKSPACE_STORAGE_CLASS` 时，不需要同步修改内容卷 YAML
+
+生产脚本 [k8s-prod-up.sh](file:///d:/Go/HDU-RIDE/scripts/k8s-prod-up.sh) 会在正式部署前检查内容卷的 `storageClassName` 和容量；如果集群里已有属性不一致的旧 PV/PVC，会先删除旧对象再重新创建。
 
 ### 9.2 初始化内容目录
 
@@ -550,6 +564,7 @@ test -d /opt/hdu-ride/content/courses && echo "content 目录已就绪"
 - `tests/hidden/` 不会复制到学生工作区
 - `starter/` 会进入学生初始工作区
 - `README.md` 是作业说明
+- 如果某个作业目录暂时缺少 `README.md`，工作区仍然可以打开，但系统只会生成一个占位说明文件；你仍应尽快把正式 `README.md` 补齐
 
 ---
 
@@ -585,7 +600,7 @@ ROOT_PASSWORD_HASH=这里稍后填写bcrypt结果
 
 K8S_NAMESPACE=hdu-ride
 WORKSPACE_IMAGE_DEFAULT=rocker/rstudio:4.6.0
-WORKSPACE_STORAGE_CLASS=standard
+WORKSPACE_STORAGE_CLASS=local-path
 WORKSPACE_CPU_REQUEST=500m
 WORKSPACE_CPU_LIMIT=1
 WORKSPACE_MEM_REQUEST=1Gi
@@ -608,9 +623,9 @@ FRONTEND_IMAGE=hdu-ride-frontend:latest
 - `ROOT_PASSWORD_HASH`
   - root 密码的 bcrypt 哈希
 - `WORKSPACE_STORAGE_CLASS`
-  - 一定要与你安装的动态存储一致
-  - 本文档默认使用 `standard`
-  - `standard` 是单节点环境下指向 `local-path` 的兼容别名，两者都使用 `Immediate`
+  - 这是学生/教师 RStudio 工作区的动态存储类
+  - 本文档默认使用 `local-path`
+  - 它只影响动态工作区卷，不影响静态内容卷
 - `WORKSPACE_IMAGE_DEFAULT`
   - 默认的 RStudio 工作区镜像
   - 当前仓库默认用 `rocker/rstudio:4.6.0`
@@ -775,10 +790,14 @@ bash scripts/k8s-prod-up.sh
 
 这个脚本在真正开始部署前，会先做一轮环境检查，至少包括：
 
+- 检查 `kubectl`、`go` 是否存在
+- 如果集群里还没有 `local-path` 或 `local-path-provisioner`，自动执行 `scripts/k8s-install-local-path.sh`
 - 强制移除单节点常见的 `control-plane/master` 调度污点
-- 生产内容卷清单 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中的 PV/PVC 是否都声明了与 `.env` 中 `WORKSPACE_STORAGE_CLASS` 一致的 `storageClassName`
+- 生产内容卷清单 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中的 PV/PVC 是否都声明了静态绑定用的 `storageClassName: ""`
 - 生产内容卷清单中的 PV/PVC 容量是否保持一致
 - 如果集群里已经存在静态 PV/PVC，但其 `storageClassName` 或容量与当前期望不一致，先删除旧对象再继续部署
+- `WORKSPACE_STORAGE_CLASS` 是否非空；单节点默认应为 `local-path`
+- `.env` 中指定的 `WORKSPACE_STORAGE_CLASS` 是否真实存在于当前集群中
 
 如果检查不通过，脚本会直接退出并给出错误提示；如果只是发现集群里已有旧的错误静态 PV/PVC，则会先删除旧对象，避免因为不可变字段导致修复失败。
 
@@ -1298,7 +1317,7 @@ cd /opt/hdu-ride
 git pull
 
 # 让 .env 与当前单节点默认策略一致
-sed -i 's/^WORKSPACE_STORAGE_CLASS=.*/WORKSPACE_STORAGE_CLASS=standard/' .env
+sed -i 's/^WORKSPACE_STORAGE_CLASS=.*/WORKSPACE_STORAGE_CLASS=local-path/' .env
 
 # 重新安装单节点存储类
 bash scripts/k8s-install-local-path.sh
@@ -1331,7 +1350,7 @@ bash scripts/k8s-prod-up.sh
 cd /opt/hdu-ride
 git pull
 
-sed -i 's/^WORKSPACE_STORAGE_CLASS=.*/WORKSPACE_STORAGE_CLASS=standard/' .env
+sed -i 's/^WORKSPACE_STORAGE_CLASS=.*/WORKSPACE_STORAGE_CLASS=local-path/' .env
 
 # 修复单节点调度与存储类
 bash scripts/k8s-install-local-path.sh
@@ -1381,8 +1400,8 @@ kubectl get svc -n hdu-ride
 
 你应当看到：
 
-- `standard` 是默认 `StorageClass`
-- `standard` 和 `local-path` 都是 `Immediate`
+- `local-path` 是默认 `StorageClass`
+- `local-path` 的 `VOLUMEBINDINGMODE` 是 `WaitForFirstConsumer`
 - `hdu-ride-content` 为 `Bound`
 - `postgres-0`、`minio-0`、`hdu-ride-backend`、`hdu-ride-frontend` 都是 `Running`
 
@@ -1398,7 +1417,81 @@ kubectl get svc -n hdu-ride
 
 ---
 
-## 20. 生产环境运维建议
+## 20. 一键诊断脚本
+
+当你在云主机上遇到“网页能打开但 RStudio 不行”“PVC 一直 Pending”“教师打不开学生工作区”“后端 500 / 网关 502”这类问题时，最麻烦的不是修，而是先把现场信息收集完整。
+
+仓库里现在提供了一个专门给生产环境排障用的脚本：
+
+- `scripts/k8s-prod-check.sh`
+
+直接执行：
+
+```bash
+cd /opt/hdu-ride
+bash scripts/k8s-prod-check.sh
+```
+
+执行完成后，它会在仓库根目录生成一份报告，默认位置类似：
+
+```text
+/opt/hdu-ride/.diagnostics/k8s-prod-check-20260507-153000.txt
+```
+
+### 20.1 它会收集什么
+
+它会尽量自动收集以下信息：
+
+- `.env` 的关键信息摘要
+- `kubectl` 当前上下文、节点、命名空间、StorageClass、PV、PVC
+- `hdu-ride` 命名空间中的 Pod、Service、Deployment、StatefulSet、事件
+- `local-path-storage`、`kube-system` 命名空间中的 Pod 与事件
+- `hdu-ride-backend`、`hdu-ride-frontend`、`postgres-0`、`minio-0` 日志
+- 所有 `rstudio-*` Pod、`home-*` PVC 的状态、`describe` 与日志
+- `kubelet`、`containerd`、`nginx` 的 `systemctl status` 与近期 `journalctl`
+- `ctr`、`crictl`、`docker` 镜像信息
+- 磁盘、内存、网络、iptables、ufw、swap、sysctl、containerd 关键配置
+
+### 20.2 脱敏说明
+
+脚本默认会对 `.env` 中的常见敏感字段做简单脱敏，例如：
+
+- `POSTGRES_PASSWORD`
+- `DATABASE_URL`
+- `S3_SECRET_ACCESS_KEY`
+- `SESSION_SECRET`
+- `ROOT_PASSWORD`
+- `ROOT_PASSWORD_HASH`
+
+但诊断报告里仍然可能包含环境路径、主机名、域名、对象名等运维信息。
+
+所以建议你：
+
+1. 生成报告后先自己看一眼
+2. 确认没有不想外发的内容
+3. 再把整份报告贴给 AI 或发给协作者
+
+### 20.3 可选参数
+
+如果你想自定义输出目录或命名空间，可以这样运行：
+
+```bash
+cd /opt/hdu-ride
+K8S_NAMESPACE=hdu-ride OUTPUT_DIR=/tmp bash scripts/k8s-prod-check.sh
+```
+
+如果你想固定输出文件名：
+
+```bash
+cd /opt/hdu-ride
+REPORT_PATH=/tmp/hdu-ride-check.txt bash scripts/k8s-prod-check.sh
+```
+
+这在你准备多次对比排障结果时会很有用。
+
+---
+
+## 21. 生产环境运维建议
 
 必须修改：
 
@@ -1407,7 +1500,7 @@ kubectl get svc -n hdu-ride
 - root 管理员密码
 - `SESSION_SECRET`
 
-### 20.2 定期备份
+### 21.2 定期备份
 
 至少要备份：
 
@@ -1416,7 +1509,7 @@ kubectl get svc -n hdu-ride
 - `/opt/hdu-ride/content`
 - `.env`
 
-### 20.3 把内容目录纳入 Git 管理
+### 21.3 把内容目录纳入 Git 管理
 
 推荐做法：
 
@@ -1424,15 +1517,15 @@ kubectl get svc -n hdu-ride
 - 内容更新走 commit
 - 管理员更新内容后只需重载课程
 
-### 20.4 修改内容优先，不要轻易改生产数据库
+### 21.4 修改内容优先，不要轻易改生产数据库
 
 讲义、作业说明、starter、测试数据都应该通过内容目录维护，而不是手工改容器里的文件。
 
 ---
 
-## 21. 最终推荐的日常操作清单
+## 22. 最终推荐的日常操作清单
 
-### 21.1 首次部署
+### 22.1 首次部署
 
 按顺序执行：
 
@@ -1450,12 +1543,12 @@ kubectl get svc -n hdu-ride
 12. 配 HTTPS
 13. 用 root 登录验收
 
-### 21.2 更新课程内容
+### 22.2 更新课程内容
 
 1. 修改 `/opt/hdu-ride/content`
 2. 管理员后台点击“重新加载”
 
-### 21.3 更新后端前端代码
+### 22.3 更新后端前端代码
 
 1. `git pull`
 2. `docker build`
@@ -1464,7 +1557,7 @@ kubectl get svc -n hdu-ride
 
 ---
 
-## 22. 你应该记住的三句话
+## 23. 你应该记住的三句话
 
 1. 内容更新不等于代码更新，改 `content/` 通常不需要重建镜像。
 2. 改了内容后要“重新加载课程”，因为后端会把课程读进内存。

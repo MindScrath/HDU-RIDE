@@ -326,7 +326,7 @@ func applySecrets(namespace, rootPasswordHash string) error {
 		"ROOT_PASSWORD_HASH":      rootPasswordHash,
 		"K8S_NAMESPACE":           namespace,
 		"WORKSPACE_IMAGE_DEFAULT": envDefault("WORKSPACE_IMAGE", envDefault("WORKSPACE_IMAGE_DEFAULT", "rocker/rstudio:4.6.0")),
-		"WORKSPACE_STORAGE_CLASS": envDefault("WORKSPACE_STORAGE_CLASS", "standard"),
+		"WORKSPACE_STORAGE_CLASS": envDefault("WORKSPACE_STORAGE_CLASS", "local-path"),
 		"WORKSPACE_CPU_REQUEST":   envDefault("WORKSPACE_CPU_REQUEST", "500m"),
 		"WORKSPACE_CPU_LIMIT":     envDefault("WORKSPACE_CPU_LIMIT", "1"),
 		"WORKSPACE_MEM_REQUEST":   envDefault("WORKSPACE_MEM_REQUEST", "1Gi"),
