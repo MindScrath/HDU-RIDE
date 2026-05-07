@@ -3,6 +3,7 @@ set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/deploy/k8s/local-path-storage-v0.0.28.yaml"
+SC_MANIFEST="$ROOT/deploy/k8s/storageclasses-single-node.yml"
 
 LOCAL_PATH_PROVISIONER_VERSION="${LOCAL_PATH_PROVISIONER_VERSION:-v0.0.28}"
 LOCAL_PATH_PROVISIONER_IMAGE="${LOCAL_PATH_PROVISIONER_IMAGE:-rancher/local-path-provisioner:${LOCAL_PATH_PROVISIONER_VERSION}}"
@@ -25,10 +26,18 @@ pull_and_import() {
   rm -f "$archive_path"
 }
 
+untaint_single_node() {
+  kubectl taint nodes --all node-role.kubernetes.io/control-plane- >/dev/null 2>&1 || true
+  kubectl taint nodes --all node-role.kubernetes.io/master- >/dev/null 2>&1 || true
+}
+
 pull_and_import "$LOCAL_PATH_PROVISIONER_PULL_IMAGE" "$LOCAL_PATH_PROVISIONER_IMAGE" "local-path-provisioner.tar"
 pull_and_import "$LOCAL_PATH_HELPER_PULL_IMAGE" "$LOCAL_PATH_HELPER_IMAGE" "local-path-helper.tar"
 
 kubectl apply -f "$MANIFEST"
-kubectl patch storageclass local-path -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+untaint_single_node
+kubectl delete storageclass standard --ignore-not-found
+kubectl delete storageclass local-path --ignore-not-found
+kubectl apply -f "$SC_MANIFEST"
 kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=180s
 kubectl get storageclass

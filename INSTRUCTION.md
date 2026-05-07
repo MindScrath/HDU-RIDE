@@ -353,7 +353,13 @@ kubectl get nodes
 
 ```bash
 kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+kubectl taint nodes --all node-role.kubernetes.io/master-
 ```
+
+说明：
+
+- 不同发行版或不同安装方式下，污点键可能是 `control-plane`，也可能是 `master`
+- 在单节点 Kubernetes 中，必须把这两类常见污点都移除，避免所有业务 Pod 因 `NoSchedule` 卡死
 
 ### 6.7 安装 Flannel 网络插件
 
@@ -394,16 +400,26 @@ kubectl get pods -n kube-system
 
 - [local-path-storage-v0.0.28.yaml](file:///d:/Go/HDU-RIDE/deploy/k8s/local-path-storage-v0.0.28.yaml)
 
-其中版本已经锁死为：
+其中基础镜像版本已经锁死为：
 
 - `rancher/local-path-provisioner:v0.0.28`
 - `busybox:1.36`
 
-这意味着以下三处天然保持一致：
+另外，仓库还内置了单节点专用的存储类定义：
+
+- [storageclasses-single-node.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/storageclasses-single-node.yml)
+
+这里做了两件关键事情：
+
+1. 把 `local-path` 的 `volumeBindingMode` 强制改成 `Immediate`
+2. 创建 `standard` 别名，同样指向 `rancher.io/local-path`，并且同样使用 `Immediate`
+
+这意味着以下几处天然保持一致：
 
 1. 仓库中的 YAML 清单
 2. 安装脚本预拉取与导入的镜像
 3. 集群运行时引用的镜像
+4. 单节点环境里实际使用的 `StorageClass` 绑定策略
 
 ### 7.2 一键安装 local-path-provisioner
 
@@ -419,9 +435,12 @@ bash scripts/k8s-install-local-path.sh
 1. 预拉取 `rancher/local-path-provisioner:v0.0.28`
 2. 预拉取 `busybox:1.36`
 3. 导入 `containerd`
-4. 应用仓库中的固定版本 YAML
-5. 把 `local-path` 设为默认 `StorageClass`
-6. 等待 `local-path-provisioner` 就绪
+4. 强制移除单节点常见的 `control-plane/master` 调度污点
+5. 应用仓库中的固定版本 provisioner YAML
+6. 删除并重建 `local-path` 与 `standard` 两个 `StorageClass`
+7. 将两者的 `volumeBindingMode` 固定为 `Immediate`
+8. 把 `standard` 设为默认 `StorageClass`
+9. 等待 `local-path-provisioner` 就绪
 
 如果你所在环境只能从镜像代理拉取，也不需要手工改 YAML，只要这样执行：
 
@@ -441,7 +460,9 @@ kubectl get storageclass
 你应该能看到：
 
 - `local-path`
-- 并且它带有 `(default)` 标记
+- `standard`
+- 其中 `standard` 带有 `(default)` 标记
+- 两者的 `VOLUMEBINDINGMODE` 都应为 `Immediate`
 
 ---
 
@@ -481,14 +502,14 @@ git pull
 虽然 `PersistentVolume` 自身是集群级资源，不属于某个命名空间，但它要绑定的 `PersistentVolumeClaim` 是创建在 `hdu-ride` 命名空间中的。因此在生产环境里，手动创建静态 PV 作为内容卷时，必须同时保证下面两件事：
 
 1. `PersistentVolumeClaim` 的命名空间正确，是 `hdu-ride`
-2. 静态 PV 与静态 PVC 的 `storageClassName` 和集群默认动态存储类保持一致，例如本文档中的 `local-path`
+2. 静态 PV 与静态 PVC 的 `storageClassName` 和集群默认动态存储类保持一致，例如本文档默认的 `standard`
 
 如果这里不一致，Kubernetes 会因为 `VolumeMismatch` 拒绝绑定，最终表现为：
 
 - `hdu-ride-content` 一直无法绑定
 - 后端 Pod 因挂载内容卷失败而长期处于 `Pending`
 
-当前仓库已经在 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中把内容卷的 `storageClassName` 固定为 `local-path`，并且生产脚本 [k8s-prod-up.sh](file:///d:/Go/HDU-RIDE/scripts/k8s-prod-up.sh) 会在正式部署前做一致性检查。
+当前仓库已经在 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中把内容卷的 `storageClassName` 默认固定为 `standard`。如果你修改了 `.env` 中的 `WORKSPACE_STORAGE_CLASS`，请同步更新这个文件中的 `storageClassName`，否则会因为 `VolumeMismatch` 无法绑定。生产脚本 [k8s-prod-up.sh](file:///d:/Go/HDU-RIDE/scripts/k8s-prod-up.sh) 会在正式部署前做这类一致性检查；如果发现集群里已经存在属性不一致的静态 PV/PVC，还会先删除旧对象再继续 `apply`。
 
 ### 9.2 初始化内容目录
 
@@ -564,7 +585,7 @@ ROOT_PASSWORD_HASH=这里稍后填写bcrypt结果
 
 K8S_NAMESPACE=hdu-ride
 WORKSPACE_IMAGE_DEFAULT=rocker/rstudio:4.6.0
-WORKSPACE_STORAGE_CLASS=local-path
+WORKSPACE_STORAGE_CLASS=standard
 WORKSPACE_CPU_REQUEST=500m
 WORKSPACE_CPU_LIMIT=1
 WORKSPACE_MEM_REQUEST=1Gi
@@ -588,7 +609,8 @@ FRONTEND_IMAGE=hdu-ride-frontend:latest
   - root 密码的 bcrypt 哈希
 - `WORKSPACE_STORAGE_CLASS`
   - 一定要与你安装的动态存储一致
-  - 本文档使用 `local-path`
+  - 本文档默认使用 `standard`
+  - `standard` 是单节点环境下指向 `local-path` 的兼容别名，两者都使用 `Immediate`
 - `WORKSPACE_IMAGE_DEFAULT`
   - 默认的 RStudio 工作区镜像
   - 当前仓库默认用 `rocker/rstudio:4.6.0`
@@ -753,10 +775,12 @@ bash scripts/k8s-prod-up.sh
 
 这个脚本在真正开始部署前，会先做一轮环境检查，至少包括：
 
-- 生产内容卷清单 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中的 PV/PVC 是否都声明了 `storageClassName: local-path`
-- 如果集群里已经存在静态 PV `hdu-ride-content-pv`，它的 `storageClassName` 是否确实为 `local-path`
+- 强制移除单节点常见的 `control-plane/master` 调度污点
+- 生产内容卷清单 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中的 PV/PVC 是否都声明了与 `.env` 中 `WORKSPACE_STORAGE_CLASS` 一致的 `storageClassName`
+- 生产内容卷清单中的 PV/PVC 容量是否保持一致
+- 如果集群里已经存在静态 PV/PVC，但其 `storageClassName` 或容量与当前期望不一致，先删除旧对象再继续部署
 
-如果检查不通过，脚本会直接退出并给出错误提示，而不会继续把后端部署到一个注定会 `Pending` 的环境里。
+如果检查不通过，脚本会直接退出并给出错误提示；如果只是发现集群里已有旧的错误静态 PV/PVC，则会先删除旧对象，避免因为不可变字段导致修复失败。
 
 这条命令实际会：
 
