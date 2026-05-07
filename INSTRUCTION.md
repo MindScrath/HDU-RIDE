@@ -1272,11 +1272,133 @@ WORKSPACE_CPU_REQUEST=250m
 WORKSPACE_MEM_REQUEST=512Mi
 ```
 
+### 19.8 中途装乱了如何恢复并继续部署
+
+这是单节点 Kubernetes 上最常见的真实场景：
+
+- 存储类装了一半
+- `content-pvc-prod.yml` 改过几次
+- `WORKSPACE_STORAGE_CLASS` 前后不一致
+- `postgres/minio/backend/frontend` 有的已经启动，有的还在报错
+
+这时**不要直接推倒整个 Kubernetes 集群重装**，优先按下面的方法恢复。
+
+#### 情况 A：轻度混乱，只是存储类或内容卷不一致
+
+典型现象：
+
+- `hdu-ride-content` 是 `Pending`
+- `kubectl describe pvc` 里出现 `VolumeMismatch`
+- `k8s-prod-up.sh` 提示 `storageClassName` 不匹配
+
+恢复步骤：
+
+```bash
+cd /opt/hdu-ride
+git pull
+
+# 让 .env 与当前单节点默认策略一致
+sed -i 's/^WORKSPACE_STORAGE_CLASS=.*/WORKSPACE_STORAGE_CLASS=standard/' .env
+
+# 重新安装单节点存储类
+bash scripts/k8s-install-local-path.sh
+
+# 删除旧的静态内容卷对象并按新清单重建
+kubectl delete pvc hdu-ride-content -n hdu-ride --ignore-not-found
+kubectl delete pv hdu-ride-content-pv --ignore-not-found
+kubectl apply -f deploy/k8s/content-pvc-prod.yml
+
+# 重新部署
+bash scripts/k8s-prod-up.sh
+```
+
+注意：
+
+- 删除 `hdu-ride-content-pv/pvc` 不会删除宿主机上的 `/opt/hdu-ride/content`
+- 因为它是 `hostPath` 静态内容目录，真正的数据仍在磁盘上
+
+#### 情况 B：中度混乱，数据库/对象存储服务也被错误配置影响
+
+典型现象：
+
+- `postgres-0`、`minio-0` 启动失败
+- `backend` 一直起不来
+- 之前删过一部分对象，当前状态不完整
+
+恢复步骤：
+
+```bash
+cd /opt/hdu-ride
+git pull
+
+sed -i 's/^WORKSPACE_STORAGE_CLASS=.*/WORKSPACE_STORAGE_CLASS=standard/' .env
+
+# 修复单节点调度与存储类
+bash scripts/k8s-install-local-path.sh
+
+# 删除内容卷对象，重新创建
+kubectl delete pvc hdu-ride-content -n hdu-ride --ignore-not-found
+kubectl delete pv hdu-ride-content-pv --ignore-not-found
+
+# 删除业务工作负载，让它们用新配置重建
+kubectl delete deploy hdu-ride-backend -n hdu-ride --ignore-not-found
+kubectl delete deploy hdu-ride-frontend -n hdu-ride --ignore-not-found
+kubectl delete sts postgres -n hdu-ride --ignore-not-found
+kubectl delete sts minio -n hdu-ride --ignore-not-found
+
+# 重新部署
+bash scripts/k8s-prod-up.sh
+```
+
+这一步通常已经足够恢复大多数“半成功半失败”的服务器。
+
+#### 情况 C：RStudio 工作区资源污染了环境
+
+典型现象：
+
+- 网站能打开，但学生或教师的 RStudio 老是失败
+- 命名空间里残留很多 `rstudio-*` Pod、PVC、Service
+
+恢复步骤：
+
+```bash
+kubectl delete pod -n hdu-ride -l app.kubernetes.io/name=hdu-ride-rstudio --ignore-not-found
+kubectl delete svc -n hdu-ride -l hdu-ride/workspace-id --ignore-not-found
+kubectl delete pvc -n hdu-ride -l app.kubernetes.io/name=hdu-ride-rstudio --ignore-not-found 2>/dev/null || true
+```
+
+删除这些动态工作区对象后，用户下一次打开 RStudio 时，后端会重新创建干净的工作区。
+
+#### 恢复完成后的验收命令
+
+```bash
+kubectl get storageclass
+kubectl get pv
+kubectl get pvc -n hdu-ride
+kubectl get pods -n hdu-ride
+kubectl get svc -n hdu-ride
+```
+
+你应当看到：
+
+- `standard` 是默认 `StorageClass`
+- `standard` 和 `local-path` 都是 `Immediate`
+- `hdu-ride-content` 为 `Bound`
+- `postgres-0`、`minio-0`、`hdu-ride-backend`、`hdu-ride-frontend` 都是 `Running`
+
+#### 什么情况下才需要重装整个 Kubernetes
+
+只有当下面这些更底层的问题出现时，才建议重装整个单节点集群：
+
+- `kube-system` 核心组件异常，例如 `apiserver`、`etcd`、`coredns` 本身不正常
+- `kubectl get nodes` 都已经不稳定
+- `containerd` 或 `kubelet` 长期异常，且修复无效
+
+如果只是 `hdu-ride` 命名空间里的资源乱了，通常不需要重装整个集群。
+
 ---
 
 ## 20. 生产环境运维建议
-
-### 20.1 不要直接把默认密码上线
 
 必须修改：
 

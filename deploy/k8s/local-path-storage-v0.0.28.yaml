@@ -104,6 +104,7 @@ spec:
         - name: config-volume
           configMap:
             name: local-path-config
+---
 kind: ConfigMap
 apiVersion: v1
 metadata:
