@@ -439,12 +439,12 @@ func repoRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "NewDemand.md")); err == nil {
+		if looksLikeRepoRoot(dir) {
 			return dir, nil
 		}
 		if filepath.Base(dir) == "backend" {
 			parent := filepath.Dir(dir)
-			if _, err := os.Stat(filepath.Join(parent, "NewDemand.md")); err == nil {
+			if looksLikeRepoRoot(parent) {
 				return parent, nil
 			}
 		}
@@ -454,6 +454,21 @@ func repoRoot() (string, error) {
 		}
 		dir = parent
 	}
+}
+
+func looksLikeRepoRoot(dir string) bool {
+	markers := []string{
+		filepath.Join(dir, "README.md"),
+		filepath.Join(dir, "backend", "main.go"),
+		filepath.Join(dir, "frontend", "package.json"),
+		filepath.Join(dir, "deploy", "k8s", "backend.yml"),
+	}
+	for _, marker := range markers {
+		if _, err := os.Stat(marker); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func loadEnvFile(path string) error {
