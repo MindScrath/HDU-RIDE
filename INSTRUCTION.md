@@ -388,16 +388,48 @@ kubectl get pods -n kube-system
 
 如果你没有动态存储类，Pod 会一直卡在 `Pending`。
 
-### 7.1 安装 local-path-provisioner
+### 7.1 固定版本说明
+
+为了方便用户安装，仓库已经直接内置了固定版本的存储类清单：
+
+- [local-path-storage-v0.0.28.yaml](file:///d:/Go/HDU-RIDE/deploy/k8s/local-path-storage-v0.0.28.yaml)
+
+其中版本已经锁死为：
+
+- `rancher/local-path-provisioner:v0.0.28`
+- `busybox:1.36`
+
+这意味着以下三处天然保持一致：
+
+1. 仓库中的 YAML 清单
+2. 安装脚本预拉取与导入的镜像
+3. 集群运行时引用的镜像
+
+### 7.2 一键安装 local-path-provisioner
+
+直接执行：
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+cd /opt/hdu-ride
+bash scripts/k8s-install-local-path.sh
 ```
 
-### 7.2 设为默认 StorageClass
+这个脚本会自动完成：
+
+1. 预拉取 `rancher/local-path-provisioner:v0.0.28`
+2. 预拉取 `busybox:1.36`
+3. 导入 `containerd`
+4. 应用仓库中的固定版本 YAML
+5. 把 `local-path` 设为默认 `StorageClass`
+6. 等待 `local-path-provisioner` 就绪
+
+如果你所在环境只能从镜像代理拉取，也不需要手工改 YAML，只要这样执行：
 
 ```bash
-kubectl patch storageclass local-path -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+cd /opt/hdu-ride
+LOCAL_PATH_PROVISIONER_PULL_IMAGE=<你的镜像代理地址>/rancher/local-path-provisioner:v0.0.28 \
+LOCAL_PATH_HELPER_PULL_IMAGE=<你的镜像代理地址>/busybox:1.36 \
+bash scripts/k8s-install-local-path.sh
 ```
 
 ### 7.3 验证
@@ -631,6 +663,7 @@ sudo docker pull rocker/rstudio:4.6.0
   - 初始化 bucket 用的客户端镜像
 - `busybox:1.36`
   - 给 RStudio 工作区预填 starter 内容的 init container
+  - local-path 存储类的 helperPod 也使用这个固定版本
 - `rocker/rstudio:4.6.0`
   - 学生与教师使用的 RStudio 工作区镜像
 
@@ -663,7 +696,7 @@ sudo ctr -n k8s.io images import rstudio.tar
 可验证：
 
 ```bash
-sudo ctr -n k8s.io images list | grep -E 'hdu-ride|postgres|minio|busybox|rstudio'
+sudo ctr -n k8s.io images list | grep -E 'hdu-ride|postgres|minio|local-path-provisioner|busybox|rstudio'
 ```
 
 ### 11.4 可选：使用自定义 RStudio 镜像
