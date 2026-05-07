@@ -474,7 +474,23 @@ git pull
 
 这来自 `deploy/k8s/content-pvc-prod.yml` 里的 `hostPath`。
 
-### 9.1 初始化内容目录
+### 9.1 静态 PV 的命名空间一致性说明
+
+这里有一个非常容易忽略的点。
+
+虽然 `PersistentVolume` 自身是集群级资源，不属于某个命名空间，但它要绑定的 `PersistentVolumeClaim` 是创建在 `hdu-ride` 命名空间中的。因此在生产环境里，手动创建静态 PV 作为内容卷时，必须同时保证下面两件事：
+
+1. `PersistentVolumeClaim` 的命名空间正确，是 `hdu-ride`
+2. 静态 PV 与静态 PVC 的 `storageClassName` 和集群默认动态存储类保持一致，例如本文档中的 `local-path`
+
+如果这里不一致，Kubernetes 会因为 `VolumeMismatch` 拒绝绑定，最终表现为：
+
+- `hdu-ride-content` 一直无法绑定
+- 后端 Pod 因挂载内容卷失败而长期处于 `Pending`
+
+当前仓库已经在 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中把内容卷的 `storageClassName` 固定为 `local-path`，并且生产脚本 [k8s-prod-up.sh](file:///d:/Go/HDU-RIDE/scripts/k8s-prod-up.sh) 会在正式部署前做一致性检查。
+
+### 9.2 初始化内容目录
 
 ```bash
 mkdir -p /opt/hdu-ride/content
@@ -488,7 +504,7 @@ test -d /opt/hdu-ride/content/courses && echo "content 目录已就绪"
 - 所以后续管理员直接维护 `/opt/hdu-ride/content` 即可，不需要再做额外同步
 - 如果担心误操作，建议把 `/opt/hdu-ride` 纳入 Git 管理并定期备份
 
-### 9.2 内容目录结构
+### 9.3 内容目录结构
 
 课程目录大致如下：
 
@@ -734,6 +750,13 @@ WORKSPACE_IMAGE_DEFAULT=hdu-ride-rstudio:latest
 cd /opt/hdu-ride
 bash scripts/k8s-prod-up.sh
 ```
+
+这个脚本在真正开始部署前，会先做一轮环境检查，至少包括：
+
+- 生产内容卷清单 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中的 PV/PVC 是否都声明了 `storageClassName: local-path`
+- 如果集群里已经存在静态 PV `hdu-ride-content-pv`，它的 `storageClassName` 是否确实为 `local-path`
+
+如果检查不通过，脚本会直接退出并给出错误提示，而不会继续把后端部署到一个注定会 `Pending` 的环境里。
 
 这条命令实际会：
 
