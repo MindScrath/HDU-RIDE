@@ -392,6 +392,18 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 kubectl get nodes
 ```
 
+这里第一次执行 `kubectl get nodes` 时，看到当前节点是 `NotReady` 通常是正常的。
+
+原因很简单：这时 Kubernetes 控制平面已经起来了，但容器网络插件还没有安装，节点还不能进入最终可调度状态。
+
+所以在这一步：
+
+- 看到 `Your Kubernetes control-plane has initialized successfully!` 是第一层成功
+- 看到 `kubectl get nodes` 能正常返回节点列表，说明 `kubectl` 配置已经生效
+- 此时节点暂时显示 `NotReady`，可以继续执行下一步，不需要在这里停很久
+
+真正需要等待的是安装完 Flannel 之后，再确认节点转为 `Ready`。
+
 ### 7.6 允许工作负载调度到控制平面节点
 
 单机部署必须执行：
@@ -427,6 +439,20 @@ kubectl get pods -n kube-system
 ```
 
 看到 `kube-flannel`、`coredns` 都变成 `Running` 再继续。
+
+同时再检查一次：
+
+```bash
+kubectl get nodes
+```
+
+此时正常状态应该是：
+
+- 控制平面节点从 `NotReady` 变成 `Ready`
+- `kube-flannel` Pod 为 `Running`
+- `coredns` Pod 为 `Running`
+
+只有这些条件满足后，才建议继续执行后面的 `local-path`、镜像导入和 `k8s-prod-up.sh`。
 
 ---
 
