@@ -71,6 +71,9 @@ CONTENT_PVC_MANIFEST="$ROOT/deploy/k8s/content-pvc-prod.yml"
 require_command kubectl
 require_command go
 
+export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+export GOSUMDB="${GOSUMDB:-sum.golang.google.cn}"
+
 if [ ! -f "$CONTENT_PVC_MANIFEST" ]; then
   echo "错误：找不到生产内容卷清单 $CONTENT_PVC_MANIFEST"
   exit 1

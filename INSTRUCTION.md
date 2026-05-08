@@ -286,6 +286,17 @@ go version
 
 如果你的机器不是 `amd64`，请改成对应架构的安装包文件名。
 
+安装完成后，立刻配置 Go 模块代理：
+
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
+go env -w GOSUMDB=sum.golang.google.cn
+go env GOPROXY
+go env GOSUMDB
+```
+
+这一步要在第一次执行 `bash scripts/k8s-prod-up.sh` 之前完成。因为该脚本最终会调用 `go run . ops k8s-prod-up`，如果没有先配置 `GOPROXY`，Go 依赖下载可能会直接卡在国外网络。
+
 如果阿里云镜像临时不可用，再退回这些备选：
 
 - `https://golang.google.cn/dl/`
@@ -888,6 +899,12 @@ WORKSPACE_IMAGE_DEFAULT=hdu-ride-rstudio:latest
 cd /opt/hdu-ride
 bash scripts/k8s-prod-up.sh
 ```
+
+说明：
+
+- 请先按前面的 Go 安装章节配置好 `GOPROXY` 与 `GOSUMDB`
+- 当前脚本内部也会默认兜底为 `GOPROXY=https://goproxy.cn,direct`
+- 但首次部署仍建议你先手工执行 `go env -w ...`，避免后续单独运行 `go` 命令时又走回国外网络
 
 这个脚本在真正开始部署前，会先做一轮环境检查，至少包括：
 
