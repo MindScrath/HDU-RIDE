@@ -428,8 +428,18 @@ bash scripts/k8s-install-flannel.sh
 说明：
 
 - 仓库已内置固定版 [kube-flannel.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/kube-flannel.yml)
-- 脚本会优先通过国内代理地址预拉 Flannel 镜像，再应用本地清单
+- 脚本会优先通过多个国内可用镜像代理预拉 Flannel 镜像，再应用本地清单
 - 这样可以避免在云主机上直接访问 GitHub Raw 或 GitHub Release
+- 某些公共镜像代理可能对 GHCR 路径返回 `403`；脚本现在会自动切换到下一个候选镜像源
+
+如果你有自己确认可用的代理地址，也可以手工指定：
+
+```bash
+cd /opt/hdu-ride
+FLANNEL_PULL_IMAGE=<你的可用镜像地址> \
+FLANNEL_CNI_PULL_IMAGE=<你的可用镜像地址> \
+bash scripts/k8s-install-flannel.sh
+```
 
 等待网络组件启动：
 
