@@ -1,27 +1,24 @@
 # HDU RIDE Ubuntu 22.04 / 24.04 从 0 到公网部署手册
 
-本文档面向第一次接触本项目、第一次在 Ubuntu 云主机上部署 Kubernetes 应用的用户。
+本文档面向第一次在 Ubuntu 云主机上部署本项目的用户。
 
-目标是让你在一台全新的 Ubuntu 22.04 或 24.04 云主机上，把 `HDU RIDE` 从零部署成功，并最终通过域名访问，例如：
+目标是把 `HDU RIDE` 从零部署到公网，并通过域名访问，例如：
 
 - `http://ride.mindsratch.top`
 - `https://ride.mindsratch.top`
 
-本文档不仅覆盖“怎么部署”，还覆盖：
+文档同时覆盖：
 
-- 这个项目到底由哪些部分组成
-- 每条命令的作用是什么
-- 内容如何更新
-- 代码如何升级
-- 常见错误如何排查
-
-如果你只想先知道最终架构，可以先看“部署后的整体结构”。
+- 部署步骤
+- 内容更新
+- 代码升级
+- 常见排障
 
 ---
 
 ## 1. 项目是什么
 
-`HDU RIDE` 是一个面向教学场景的平台，核心能力有：
+`HDU RIDE` 是一个教学平台，核心组件如下：
 
 - 课程内容展示：讲义、章节、作业说明来自仓库中的 `content/`
 - 班级与成员管理：由后端和 PostgreSQL 维护
@@ -51,41 +48,29 @@
 
 ### 1.2 运行时架构
 
-部署完成后，组件关系如下：
+部署后链路如下：
 
-1. 外层公网流量先到 Ubuntu 主机上的 Nginx
-2. Nginx 将流量反代到 Kubernetes 内部前端入口 `127.0.0.1:30080`
-3. 前端容器内的 Nginx 负责：
-   - 静态页面
-   - `/api` 转发给 Go 后端
-   - `/ide` 转发给 Go 后端
-4. Go 后端负责：
-   - 操作 PostgreSQL
-   - 读取课程内容
-   - 读写 MinIO 对象存储
-   - 创建/销毁学生的 RStudio Pod、PVC、Service、NetworkPolicy
-   - 将 `/ide/s/:workspaceID/` 代理到对应的 RStudio Pod
-5. 学生作业工作区数据保存在动态 PVC 中
-6. 课程内容来自宿主机目录 `/opt/hdu-ride/content`
+1. 公网流量先进入宿主机 Nginx
+2. Nginx 反代到前端 NodePort `127.0.0.1:30080`
+3. 前端容器内 Nginx 提供静态页面，并将 `/api`、`/ide` 转发给 Go 后端
+4. Go 后端负责 PostgreSQL、MinIO、课程内容和 RStudio 工作区管理
+5. 学生工作区数据保存在动态 PVC 中，课程内容来自 `/opt/hdu-ride/content`
 
-### 1.3 这个部署方案的特点
+### 1.3 本文档采用的方案
 
-本文档采用：
-
-- `kubeadm` 单节点 Kubernetes
-- `containerd` 作为 Kubernetes 运行时
+- 单节点 `kubeadm` Kubernetes
+- `containerd` 作为运行时
 - `Flannel` 作为容器网络
 - `local-path-provisioner` 作为动态存储
 - 宿主机 `hostPath` 挂载课程内容目录
 - 宿主机 Nginx 负责域名和 HTTPS
 
-这样做的优点是：
+优点：
 
-- 架构清晰，和正式 Kubernetes 一致
+- 架构接近标准 Kubernetes
 - 不依赖 K3s
-- 内容目录就在宿主机上，管理员容易管理
-- 后续升级前后端镜像比较直接
-- 域名、HTTPS、反向代理都在宿主机 Nginx 上统一管理
+- 内容目录在宿主机上，便于维护
+- 镜像升级路径清晰
 
 ---
 
@@ -145,7 +130,7 @@ nslookup ride.mindsratch.top
 
 ## 3. 部署后的整体结构
 
-部署完成后，主机上的关键目录和职责如下：
+部署完成后的关键目录：
 
 - `/opt/hdu-ride`
   - 项目仓库
@@ -163,11 +148,54 @@ nslookup ride.mindsratch.top
 
 ---
 
-## 4. Ubuntu 基础初始化
+## 4. 获取项目代码
+
+生产部署统一使用 `/opt/hdu-ride`，但不要直接在 `/opt` 下面 `git clone`。
+
+如果当前还是一台几乎没初始化过的全新 Ubuntu，而系统里还没有 `git`，先执行：
+
+```bash
+sudo apt update
+sudo apt install -y git
+```
+
+推荐做法：
+
+1. 先在当前用户的 `home` 目录下克隆仓库
+2. 再整体拷贝到 `/opt/hdu-ride`
+3. 后续所有命令都在 `/opt/hdu-ride` 中执行
+
+推荐执行：
+
+```bash
+cd ~
+git clone https://github.com/MindScrath/HDU-RIDE.git hdu-ride
+sudo rm -rf /opt/hdu-ride
+sudo mkdir -p /opt
+sudo cp -a ~/hdu-ride /opt/hdu-ride
+sudo chown -R $USER:$USER /opt/hdu-ride
+cd /opt/hdu-ride
+```
+
+如果代码已经存在，后续升级直接在 `/opt/hdu-ride` 里执行即可：
+
+```bash
+cd /opt/hdu-ride
+git pull
+```
+
+说明：
+
+- 部署脚本、内容目录、构建上下文都以 `/opt/hdu-ride` 为基准
+- 只是“获取代码”这一步不建议直接在 `/opt` 里执行 `git clone`
+
+---
+
+## 5. Ubuntu 基础初始化
 
 以下步骤在全新 Ubuntu 22.04 / 24.04 上执行。
 
-### 4.1 更新系统并安装基础工具
+### 5.1 更新系统并安装基础工具
 
 国内云主机建议先把 Ubuntu 软件源切到国内镜像，再执行 `apt update`。以阿里云镜像站为例：
 
@@ -206,7 +234,7 @@ sudo apt install -y \
 - `nginx`：公网反向代理
 - `docker.io`：本地构建镜像
 
-### 4.2 启动并设置服务开机自启
+### 5.2 启动并设置服务开机自启
 
 ```bash
 sudo systemctl enable --now docker
@@ -220,7 +248,7 @@ sudo systemctl enable --now containerd
 - `containerd` 是 Kubernetes 实际使用的运行时
 - `nginx` 是公网入口
 
-### 4.3 可选：设置时区
+### 5.3 可选：设置时区
 
 ```bash
 timedatectl
@@ -229,7 +257,7 @@ sudo timedatectl set-timezone Asia/Shanghai
 
 ---
 
-## 5. 安装 Go
+## 6. 安装 Go
 
 本仓库的生产部署脚本 `scripts/k8s-prod-up.sh` 最终会调用：
 
@@ -265,11 +293,11 @@ go version
 
 ---
 
-## 6. 安装 Kubernetes
+## 7. 安装 Kubernetes
 
 这里使用的是标准 `kubeadm`，不是 K3s。
 
-### 6.1 安装 kubeadm / kubelet / kubectl
+### 7.1 安装 kubeadm / kubelet / kubectl
 
 ```bash
 sudo mkdir -p /etc/apt/keyrings
@@ -287,7 +315,7 @@ sudo systemctl enable --now kubelet
 - `kubelet`：节点代理
 - `kubectl`：命令行管理工具
 
-### 6.2 打开内核参数并关闭 swap
+### 7.2 打开内核参数并关闭 swap
 
 ```bash
 sudo modprobe br_netfilter
@@ -310,7 +338,7 @@ sudo sed -i '/ swap / s/^/#/' /etc/fstab
 - 打开 IPv4 转发
 - 关闭 swap，满足 kubeadm 要求
 
-### 6.3 配置 containerd
+### 7.3 配置 containerd
 
 很多国内服务器初始化失败，根因是：
 
@@ -343,7 +371,7 @@ sudo systemctl restart containerd
 sudo systemctl restart kubelet
 ```
 
-### 6.4 初始化单节点集群
+### 7.4 初始化单节点集群
 
 ```bash
 sudo kubeadm init \
@@ -355,7 +383,7 @@ sudo kubeadm init \
 
 - `Your Kubernetes control-plane has initialized successfully!`
 
-### 6.5 配置当前用户的 kubectl
+### 7.5 配置当前用户的 kubectl
 
 ```bash
 mkdir -p $HOME/.kube
@@ -364,7 +392,7 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 kubectl get nodes
 ```
 
-### 6.6 允许工作负载调度到控制平面节点
+### 7.6 允许工作负载调度到控制平面节点
 
 单机部署必须执行：
 
@@ -378,7 +406,7 @@ kubectl taint nodes --all node-role.kubernetes.io/master-
 - 不同发行版或不同安装方式下，污点键可能是 `control-plane`，也可能是 `master`
 - 在单节点 Kubernetes 中，必须把这两类常见污点都移除，避免所有业务 Pod 因 `NoSchedule` 卡死
 
-### 6.7 安装 Flannel 网络插件
+### 7.7 安装 Flannel 网络插件
 
 ```bash
 cd /opt/hdu-ride
@@ -402,52 +430,35 @@ kubectl get pods -n kube-system
 
 ---
 
-## 7. 安装动态存储
+## 8. 安装动态存储
 
-这是生产部署中非常容易漏掉的一步。
+没有动态存储类时，PostgreSQL、MinIO 和学生工作区都会因为 PVC 无法绑定而卡在 `Pending`。
 
-本项目有三类需要存储的东西：
+### 8.1 固定版本说明
 
-1. PostgreSQL 数据卷
-2. MinIO 数据卷
-3. 学生 RStudio 工作区 PVC
-
-其中：
-
-- PostgreSQL 和 MinIO 的 StatefulSet 会申请 PVC
-- 学生工作区会动态创建 PVC
-
-如果你没有动态存储类，Pod 会一直卡在 `Pending`。
-
-### 7.1 固定版本说明
-
-为了方便用户安装，仓库已经直接内置了固定版本的存储类清单：
+仓库内置了固定版本的存储清单：
 
 - [local-path-storage-v0.0.28.yaml](file:///d:/Go/HDU-RIDE/deploy/k8s/local-path-storage-v0.0.28.yaml)
 
-其中基础镜像版本已经锁死为：
+基础镜像版本固定为：
 
 - `rancher/local-path-provisioner:v0.0.28`
 - `busybox:1.36`
 
-另外，仓库还内置了单节点专用的存储类定义：
+仓库还内置了单节点专用的存储类定义：
 
 - [storageclasses-single-node.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/storageclasses-single-node.yml)
 
-这里采用更接近工业实践的做法：
+当前存储策略：
 
 1. 单节点环境只保留一个动态 `StorageClass`：`local-path`
 2. `local-path` 被设为默认类
 3. `volumeBindingMode` 保持为 `WaitForFirstConsumer`
 
-这样做的原因是：
+- 保留 `WaitForFirstConsumer`，避免 `no node was specified`
+- 只保留一个动态类，减少单节点环境下的绑定歧义
 
-- `local-path-provisioner` 为本地盘动态供给卷时，需要结合调度节点信息
-- 把它强行改成 `Immediate` 容易触发 `no node was specified`
-- 单节点环境真正应该解的是节点污点，而不是把 `volumeBindingMode` 改坏
-- 静态内容卷不应该和动态工作区卷共用一套绑定逻辑
-
-### 7.2 一键安装 local-path-provisioner
+### 8.2 一键安装 local-path-provisioner
 
 直接执行：
 
@@ -456,7 +467,7 @@ cd /opt/hdu-ride
 bash scripts/k8s-install-local-path.sh
 ```
 
-这个脚本会自动完成：
+脚本会自动完成：
 
 1. 预拉取 `rancher/local-path-provisioner:v0.0.28`
 2. 预拉取 `busybox:1.36`
@@ -468,7 +479,7 @@ bash scripts/k8s-install-local-path.sh
 8. 保持 `volumeBindingMode=WaitForFirstConsumer`
 9. 等待 `local-path-provisioner` 就绪
 
-虽然下面的生产部署脚本 `scripts/k8s-prod-up.sh` 现在也会在检测到 `local-path` 缺失时自动调用这个安装脚本，但第一次在新机器上部署时，仍然建议你先单独执行一次。这样可以把 Kubernetes 基础设施问题尽早暴露出来，而不是等到业务部署阶段再混在一起排查。
+`scripts/k8s-prod-up.sh` 在检测到 `local-path` 缺失时也会自动调用这个脚本，但首次部署仍建议先单独执行一次，便于先排除基础设施问题。
 
 如果你所在环境只能从镜像代理拉取，也不需要手工改 YAML，只要这样执行：
 
@@ -479,7 +490,7 @@ LOCAL_PATH_HELPER_PULL_IMAGE=<你的镜像代理地址>/busybox:1.36 \
 bash scripts/k8s-install-local-path.sh
 ```
 
-### 7.3 验证
+### 8.3 验证
 
 ```bash
 kubectl get storageclass
@@ -493,62 +504,40 @@ kubectl get storageclass
 
 ---
 
-## 8. 获取项目代码
-
-统一把项目放到 `/opt/hdu-ride`。
-
-```bash
-cd /opt
-sudo git clone <你的仓库地址> hdu-ride
-sudo chown -R $USER:$USER /opt/hdu-ride
-cd /opt/hdu-ride
-```
-
-如果代码已经存在，后续升级用：
-
-```bash
-cd /opt/hdu-ride
-git pull
-```
-
----
-
 ## 9. 准备课程内容目录
 
-生产环境的课程内容不是通过开发模式的同步脚本写入 PVC，而是直接使用宿主机目录：
+生产环境直接使用宿主机目录作为课程内容源：
 
 - 宿主机目录：`/opt/hdu-ride/content`
 - 容器挂载路径：`/content`
 
-这来自 `deploy/k8s/content-pvc-prod.yml` 里的 `hostPath`。
+对应配置见 `deploy/k8s/content-pvc-prod.yml` 的 `hostPath`。
 
 ### 9.1 静态 PV 的命名空间一致性说明
 
-这里有一个非常容易忽略的点。
-
-虽然 `PersistentVolume` 自身是集群级资源，不属于某个命名空间，但它要绑定的 `PersistentVolumeClaim` 是创建在 `hdu-ride` 命名空间中的。因此在生产环境里，手动创建静态 PV 作为内容卷时，必须同时保证下面两件事：
+内容卷是静态精确绑定，手工调整 PV/PVC 时只需要记住两点：
 
 1. `PersistentVolumeClaim` 的命名空间正确，是 `hdu-ride`
 2. 静态 PV 与静态 PVC 自身的属性严格一致，例如 `storageClassName`、`capacity`、`accessModes`
 
-如果这里不一致，Kubernetes 会因为 `VolumeMismatch` 拒绝绑定，最终表现为：
+不一致时通常会出现：
 
 - `hdu-ride-content` 一直无法绑定
 - 后端 Pod 因挂载内容卷失败而长期处于 `Pending`
 
-当前仓库已经在 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中把内容卷设计成“静态精确绑定”：
+当前仓库已在 [content-pvc-prod.yml](file:///d:/Go/HDU-RIDE/deploy/k8s/content-pvc-prod.yml) 中配置为：
 
 - PV 使用 `hostPath`
 - PVC 通过 `volumeName: hdu-ride-content-pv` 精确指向该 PV
 - PV/PVC 的 `storageClassName` 都固定为 `""`
 
-这意味着：
+因此：
 
 - 内容卷不会走动态供给
 - 内容卷不会再依赖 `WORKSPACE_STORAGE_CLASS`
 - 你修改 `.env` 中的 `WORKSPACE_STORAGE_CLASS` 时，不需要同步修改内容卷 YAML
 
-生产脚本 [k8s-prod-up.sh](file:///d:/Go/HDU-RIDE/scripts/k8s-prod-up.sh) 会在正式部署前检查内容卷的 `storageClassName` 和容量；如果集群里已有属性不一致的旧 PV/PVC，会先删除旧对象再重新创建。
+生产脚本 [k8s-prod-up.sh](file:///d:/Go/HDU-RIDE/scripts/k8s-prod-up.sh) 会在部署前检查内容卷属性；若发现旧 PV/PVC 不一致，会先删除再重建。
 
 ### 9.2 初始化内容目录
 
@@ -559,10 +548,9 @@ test -d /opt/hdu-ride/content/courses && echo "content 目录已就绪"
 
 说明：
 
-- 本仓库克隆到 `/opt/hdu-ride` 后，仓库内的 `content/` 本身就是生产内容目录
-- `deploy/k8s/content-pvc-prod.yml` 会把 `/opt/hdu-ride/content` 直接挂载给后端容器
-- 所以后续管理员直接维护 `/opt/hdu-ride/content` 即可，不需要再做额外同步
-- 如果担心误操作，建议把 `/opt/hdu-ride` 纳入 Git 管理并定期备份
+- `/opt/hdu-ride/content` 就是生产内容目录
+- 管理员后续直接维护这个目录即可，不需要额外同步
+- 建议把该目录纳入 Git 并定期备份
 
 ### 9.3 内容目录结构
 
@@ -588,8 +576,7 @@ test -d /opt/hdu-ride/content/courses && echo "content 目录已就绪"
 
 - `tests/hidden/` 不会复制到学生工作区
 - `starter/` 会进入学生初始工作区
-- `README.md` 是作业说明
-- 如果某个作业目录暂时缺少 `README.md`，工作区仍然可以打开，但系统只会生成一个占位说明文件；你仍应尽快把正式 `README.md` 补齐
+- `README.md` 是作业说明；缺失时系统会生成占位说明文件
 
 ---
 
@@ -1041,25 +1028,13 @@ sudo certbot renew --dry-run
 
 ## 16. 管理员如何更新网站内容
 
-这是生产运维里最重要的日常动作。
-
 ### 16.1 先理解一个关键事实
 
 课程内容目录虽然是宿主机直挂载，但后端会在启动时把课程内容加载到内存里。
 
-所以：
+修改 `/opt/hdu-ride/content/...` 后，文件已经在容器可见，但前端不会立刻刷新；你需要再执行一次“课程重载”。
 
-- 修改 `/opt/hdu-ride/content/...` 后
-- 文件已经进入容器
-- 但前端页面不会自动立刻刷新出新内容
-
-你需要再执行一次“课程重载”。
-
-好消息是：
-
-- 不需要重建镜像
-- 不需要重启数据库
-- 不需要重启整个站点
+通常不需要重建镜像，也不需要重启整个站点。
 
 ### 16.2 推荐更新方式 A：直接改宿主机目录，再重载
 
@@ -1590,12 +1565,12 @@ REPORT_PATH=/tmp/hdu-ride-check.txt bash scripts/k8s-prod-check.sh
 
 按顺序执行：
 
-1. 安装基础工具
-2. 安装 Go
-3. 安装 Kubernetes
-4. 安装 Flannel
-5. 安装 local-path-provisioner
-6. 克隆仓库
+1. 获取项目代码并放到 `/opt/hdu-ride`
+2. 安装基础工具
+3. 安装 Go
+4. 安装 Kubernetes
+5. 安装 Flannel
+6. 安装 local-path-provisioner
 7. 准备 `/opt/hdu-ride/content`
 8. 配 `.env`
 9. 构建并导入镜像
@@ -1623,11 +1598,3 @@ REPORT_PATH=/tmp/hdu-ride-check.txt bash scripts/k8s-prod-check.sh
 1. 内容更新不等于代码更新，改 `content/` 通常不需要重建镜像。
 2. 改了内容后要“重新加载课程”，因为后端会把课程读进内存。
 3. 裸机 `kubeadm` 单节点部署时，动态存储和 Pod 网络是最容易漏掉的两件事。
-
-如果你严格照着这份文档操作，最终应该能够通过 `ride.mindsratch.top` 正常访问网站，并完成：
-
-- 管理员登录
-- 班级与用户管理
-- 学生打开 RStudio
-- 学生提交作业
-- 教师在线批阅
