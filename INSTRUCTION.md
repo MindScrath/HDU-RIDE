@@ -2,6 +2,12 @@
 
 本文档面向第一次在 Ubuntu 云主机上部署本项目的用户。
 
+文档分工如下：
+
+- 首次部署看本文档
+- 上线后的启停、检查、升级、诊断、恢复看 [MAINTAIN.md](file:///d:/Go/HDU-RIDE/MAINTAIN.md)
+- Windows 本地开发看 [DEPLOY.md](file:///d:/Go/HDU-RIDE/DEPLOY.md)
+
 目标是把 `HDU RIDE` 从零部署到公网，并通过域名访问，例如：
 
 - `http://ride.mindsratch.top`
@@ -1598,6 +1604,10 @@ REPORT_PATH=/tmp/hdu-ride-check.txt bash scripts/k8s-prod-check.sh
 ---
 
 ## 21. 生产环境运维建议
+
+如果你已经完成首次部署，后续日常维护请优先查看 [MAINTAIN.md](file:///d:/Go/HDU-RIDE/MAINTAIN.md)。
+
+本文档后面的内容只保留少量总原则；服务启停、运维工具、危险恢复操作已经统一收口到 `MAINTAIN.md`。
 
 必须修改：
 

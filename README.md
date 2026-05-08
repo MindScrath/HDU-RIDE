@@ -2,6 +2,17 @@
 
 HDU RIDE 是一个面向计量金融与 R 语言课程的教学平台。它将课程内容、作业发布与提交、批改评分、班级管理，以及“按学生/作业创建的 RStudio Server 工作空间”整合在一起。
 
+## 文档入口
+
+- [README.md](file:///d:/Go/HDU-RIDE/README.md)
+  - 项目概览与本地开发快速入口
+- [DEPLOY.md](file:///d:/Go/HDU-RIDE/DEPLOY.md)
+  - Windows 本地开发细节
+- [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md)
+  - Ubuntu 云主机首次部署
+- [MAINTAIN.md](file:///d:/Go/HDU-RIDE/MAINTAIN.md)
+  - 生产环境启停、检查、升级、诊断与恢复
+
 ## 技术栈
 
 - 后端：Go + Gin + PostgreSQL，业务代码在 `backend/app/`
@@ -126,7 +137,7 @@ cd /opt/hdu-ride
 bash scripts/k8s-prod-check.sh
 ```
 
-它会生成一份适合贴给 AI 协助排障的诊断报告。更完整的使用说明见 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md)。
+它会生成一份适合贴给 AI 协助排障的诊断报告。更完整的使用说明见 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md)，而上线后的日常维护动作统一见 [MAINTAIN.md](file:///d:/Go/HDU-RIDE/MAINTAIN.md)。
 
 如果你是在国内云主机上按生产方式部署，也请优先参考 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md) 中已经改成“国内镜像优先”的安装步骤，包括：
 
