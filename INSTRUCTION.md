@@ -746,22 +746,9 @@ ROOT_PASSWORD_HASH=$2a$10$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 建议把用到的镜像全部提前准备好。
 
-### 11.1 构建前后端镜像
+### 11.1 先配置 Docker 镜像加速器
 
-```bash
-cd /opt/hdu-ride
-sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
-sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
-```
-
-作用：
-
-- 生成生产可用的后端镜像
-- 生成生产可用的前端镜像
-
-### 11.2 预拉取运行期镜像
-
-国内环境建议优先配置 Docker 镜像加速器，再执行 `docker pull`。
+国内环境建议先配置 Docker 镜像加速器，再执行后面的 `docker build` 和 `docker pull`。否则构建前后端镜像时，基础镜像拉取就可能在第一步卡住。
 
 如果你已经在阿里云容器镜像服务中拿到了专属加速地址，可以先写入：
 
@@ -780,6 +767,21 @@ sudo systemctl restart docker
 ```
 
 如果你暂时没有阿里云专属加速地址，至少保留 `https://docker.m.daocloud.io` 作为公开代理入口。
+
+### 11.2 构建前后端镜像
+
+```bash
+cd /opt/hdu-ride
+sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
+sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
+```
+
+作用：
+
+- 生成生产可用的后端镜像
+- 生成生产可用的前端镜像
+
+### 11.3 预拉取运行期镜像
 
 然后再拉取运行期镜像：
 
@@ -819,7 +821,7 @@ sudo docker tag docker.m.daocloud.io/postgres:18-alpine postgres:18-alpine
 - `docker.m.daocloud.io/library/busybox:1.36`
 - `docker.m.daocloud.io/rocker/rstudio:4.6.0`
 
-### 11.3 导入到 containerd
+### 11.4 导入到 containerd
 
 Kubernetes 运行时看的是 `containerd`，不是 Docker 守护进程。
 
@@ -851,7 +853,7 @@ sudo ctr -n k8s.io images import rstudio.tar
 sudo ctr -n k8s.io images list | grep -E 'hdu-ride|postgres|minio|local-path-provisioner|busybox|rstudio'
 ```
 
-### 11.4 可选：使用自定义 RStudio 镜像
+### 11.5 可选：使用自定义 RStudio 镜像
 
 仓库里还有 `deploy/docker/rstudio.Dockerfile`，它会在 `rocker/rstudio:4.6.0` 基础上安装：
 
