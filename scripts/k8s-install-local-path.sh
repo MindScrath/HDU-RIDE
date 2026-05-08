@@ -17,12 +17,12 @@ pull_and_import() {
   archive_name="$3"
   archive_path="/tmp/${archive_name}"
 
-  sudo docker pull "$pull_image"
+  sudo docker pull "$pull_image" || return 1
   if [ "$pull_image" != "$target_image" ]; then
-    sudo docker tag "$pull_image" "$target_image"
+    sudo docker tag "$pull_image" "$target_image" || return 1
   fi
-  sudo docker save "$target_image" -o "$archive_path"
-  sudo ctr -n k8s.io images import "$archive_path"
+  sudo docker save "$target_image" -o "$archive_path" || return 1
+  sudo ctr -n k8s.io images import "$archive_path" || return 1
   rm -f "$archive_path"
 }
 

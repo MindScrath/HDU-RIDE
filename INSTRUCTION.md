@@ -522,6 +522,15 @@ bash scripts/k8s-install-local-path.sh
 - 脚本会优先尝试多个国内镜像代理，再回退到原始镜像地址
 - 如果 `docker.io` 直连超时，通常不需要改 YAML，直接更新脚本后重跑即可
 - 如果某个公共代理对该镜像返回 `403` 或超时，脚本会自动切换到下一个候选镜像源
+- 如果镜像阶段最终失败，脚本现在会直接退出，不会继续创建半套资源
+
+如果你之前运行过旧脚本，已经看到 `namespace/local-path-storage created` 这类输出，但 `local-path-provisioner` 一直起不来，先清掉旧资源再重试：
+
+```bash
+kubectl delete namespace local-path-storage --ignore-not-found
+kubectl delete storageclass local-path --ignore-not-found
+kubectl wait --for=delete namespace/local-path-storage --timeout=180s || true
+```
 
 如果你所在环境只能从镜像代理拉取，也不需要手工改 YAML，只要这样执行：
 

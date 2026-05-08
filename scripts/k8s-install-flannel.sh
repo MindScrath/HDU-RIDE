@@ -20,10 +20,10 @@ pull_and_tag() {
   pull_image="$1"
   target_image="$2"
 
-  sudo ctr -n k8s.io images pull "$pull_image"
+  sudo ctr -n k8s.io images pull "$pull_image" || return 1
   if [ "$pull_image" != "$target_image" ]; then
     sudo ctr -n k8s.io images rm "$target_image" >/dev/null 2>&1 || true
-    sudo ctr -n k8s.io images tag "$pull_image" "$target_image"
+    sudo ctr -n k8s.io images tag "$pull_image" "$target_image" || return 1
   fi
 }
 
