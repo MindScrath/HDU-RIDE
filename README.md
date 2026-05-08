@@ -127,3 +127,33 @@ bash scripts/k8s-prod-check.sh
 ```
 
 它会生成一份适合贴给 AI 协助排障的诊断报告。更完整的使用说明见 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md)。
+
+如果你是在国内云主机上按生产方式部署，也请优先参考 [INSTRUCTION.md](file:///d:/Go/HDU-RIDE/INSTRUCTION.md) 中已经改成“国内镜像优先”的安装步骤，包括：
+
+- Ubuntu 软件源
+- Go 安装包下载源
+- Kubernetes apt 源
+- Flannel 安装方式
+- Docker 镜像加速器与运行期镜像预拉取
+
+仓库还提供了一键初始化国内镜像配置的脚本：
+
+```bash
+cd /opt/hdu-ride
+bash scripts/setup-cn-mirrors.sh
+```
+
+Go 安装也已经脚本化，国内云主机上可以直接执行：
+
+```bash
+cd /opt/hdu-ride
+bash scripts/install-go-cn.sh
+source /etc/profile.d/go.sh
+```
+
+Kubernetes 基础环境初始化也已经脚本化，国内云主机上可以直接执行：
+
+```bash
+cd /opt/hdu-ride
+bash scripts/bootstrap-k8s-cn.sh
+```
