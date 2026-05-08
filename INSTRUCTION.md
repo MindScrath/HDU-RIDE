@@ -124,15 +124,10 @@
 可验证：
 
 ```bash
-getent ahostsv4 ride.mindsratch.top
+nslookup ride.mindsratch.top
 ```
 
 如果解析结果已经是你的云主机公网 IP，就可以继续。
-
-说明：
-
-- `getent` 在 Ubuntu 默认更常见，不需要额外安装 `dnsutils`
-- 如果你已经装了 `dnsutils`，也可以继续使用 `nslookup ride.mindsratch.top`
 
 ### 2.3 云厂商安全组
 
@@ -145,42 +140,6 @@ getent ahostsv4 ride.mindsratch.top
 如果你只通过本机执行 `kubectl`，则不需要对公网开放 `6443`。
 
 `30080` 是 NodePort，但本文档使用宿主机 Nginx 回环代理，不建议直接对公网开放 `30080`。
-
-### 2.4 先把仓库克隆到服务器
-
-后面第 4、5、6、7 章会直接使用仓库中的脚本：
-
-- `scripts/setup-cn-mirrors.sh`
-- `scripts/install-go-cn.sh`
-- `scripts/bootstrap-k8s-cn.sh`
-- `scripts/k8s-install-flannel.sh`
-- `scripts/k8s-install-local-path.sh`
-
-所以你必须先把项目仓库放到服务器上，不能等到后面再克隆。
-
-如果当前系统里还没有 `git`，先最小化安装：
-
-```bash
-sudo apt update
-sudo apt install -y git ca-certificates
-```
-
-然后执行：
-
-```bash
-cd /opt
-sudo git clone https://github.com/MindScrath/HDU-RIDE.git hdu-ride
-sudo chown -R $USER:$USER /opt/hdu-ride
-cd /opt/hdu-ride
-```
-
-建议立刻确认脚本已经在本机存在：
-
-```bash
-ls scripts
-```
-
-如果你看到 `setup-cn-mirrors.sh`、`install-go-cn.sh`、`bootstrap-k8s-cn.sh` 等脚本，再继续后面的步骤。
 
 ---
 
@@ -208,53 +167,9 @@ ls scripts
 
 以下步骤在全新 Ubuntu 22.04 / 24.04 上执行。
 
-从这一章开始，默认你已经完成第 `2.4` 节，仓库已经存在于 `/opt/hdu-ride`。
+### 4.1 更新系统并安装基础工具
 
-### 4.1 先一键切换国内镜像
-
-国内云主机建议第一步先运行仓库内置脚本，统一配置：
-
-- Ubuntu apt 镜像
-- Kubernetes apt 镜像
-- Docker 镜像加速
-- Go 模块代理
-
-执行：
-
-```bash
-cd /opt/hdu-ride
-bash scripts/setup-cn-mirrors.sh
-source /etc/profile.d/hdu-ride-go-proxy.sh
-```
-
-默认会使用：
-
-- Ubuntu 软件源：阿里云
-- Kubernetes apt 源：阿里云
-- Docker 镜像加速：`https://docker.m.daocloud.io`
-- Go 代理：`https://goproxy.cn,direct`
-
-如果你想改成自己的专属镜像加速地址，可以通过环境变量覆盖，例如：
-
-```bash
-cd /opt/hdu-ride
-DOCKER_MIRRORS='https://<your_code>.mirror.aliyuncs.com
-https://docker.m.daocloud.io' \
-GO_PROXY='https://goproxy.cn,direct' \
-bash scripts/setup-cn-mirrors.sh
-```
-
-说明：
-
-- 脚本会自动备份原有 Ubuntu 源配置
-- Ubuntu 24.04 的 `/etc/apt/sources.list.d/ubuntu.sources` 也会一并处理
-- 如果 Docker 或 containerd 已经在运行，脚本会尝试重启它们以应用镜像加速配置
-
-### 4.2 更新系统并安装基础工具
-
-如果你已经执行了上一节的 `scripts/setup-cn-mirrors.sh`，这里可以直接继续安装基础工具，不需要再手工改 Ubuntu 软件源。
-
-如果你不想运行脚本，也可以手工把 Ubuntu 软件源切到国内镜像。以阿里云镜像站为例：
+国内云主机建议先把 Ubuntu 软件源切到国内镜像，再执行 `apt update`。以阿里云镜像站为例：
 
 ```bash
 sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
@@ -291,7 +206,7 @@ sudo apt install -y \
 - `nginx`：公网反向代理
 - `docker.io`：本地构建镜像
 
-### 4.3 启动并设置服务开机自启
+### 4.2 启动并设置服务开机自启
 
 ```bash
 sudo systemctl enable --now docker
@@ -305,7 +220,7 @@ sudo systemctl enable --now containerd
 - `containerd` 是 Kubernetes 实际使用的运行时
 - `nginx` 是公网入口
 
-### 4.4 可选：设置时区
+### 4.3 可选：设置时区
 
 ```bash
 timedatectl
@@ -327,38 +242,7 @@ go run . ops k8s-prod-up
 
 当前仓库的 Go 版本要求以 `backend/go.mod` 为准。当前仓库写的是 `go 1.26`。
 
-推荐直接使用仓库内置脚本安装：
-
-```bash
-cd /opt/hdu-ride
-bash scripts/install-go-cn.sh
-source /etc/profile.d/go.sh
-go version
-```
-
-脚本特点：
-
-- 默认会从 `backend/go.mod` 读取 Go 版本
-- 默认优先尝试国内镜像下载
-- 当前默认下载顺序为：
-  - 阿里云镜像
-  - `golang.google.cn`
-  - `go.dev`
-- 自动识别常见架构：
-  - `amd64`
-  - `arm64`
-
-如果你想手工指定版本或架构，也可以这样执行：
-
-```bash
-cd /opt/hdu-ride
-GO_VERSION=1.26.0 GO_ARCH=amd64 bash scripts/install-go-cn.sh
-source /etc/profile.d/go.sh
-```
-
-如果你不想使用脚本，下面仍保留手工安装方式作为兜底。
-
-以下命令以 `amd64` 服务器为例手工安装 Go 1.26。
+以下命令以 `amd64` 服务器为例安装 Go 1.26。
 
 国内环境不要优先使用 `go.dev`，建议直接使用国内镜像站。这里优先使用阿里云镜像：
 
@@ -385,30 +269,7 @@ go version
 
 这里使用的是标准 `kubeadm`，不是 K3s。
 
-### 6.1 先执行 Kubernetes 基础初始化脚本
-
-推荐直接执行仓库内置脚本：
-
-```bash
-cd /opt/hdu-ride
-bash scripts/bootstrap-k8s-cn.sh
-```
-
-这个脚本会统一完成：
-
-- 配置 `kubeadm / kubelet / kubectl` 的国内 apt 源
-- 安装 `kubeadm / kubelet / kubectl`
-- 开启 `br_netfilter`
-- 写入 `bridge-nf-call-iptables` 和 `ip_forward`
-- 关闭 swap 并注释 `/etc/fstab` 里的 swap 项
-- 生成 `containerd` 配置
-- 打开 `SystemdCgroup`
-- 把 sandbox `pause` 镜像改为国内可拉取地址
-- 重启 `containerd` 与 `kubelet`
-
-如果你不想使用脚本，下面仍保留手工安装方式作为兜底。
-
-### 6.2 手工安装 kubeadm / kubelet / kubectl
+### 6.1 安装 kubeadm / kubelet / kubectl
 
 ```bash
 sudo mkdir -p /etc/apt/keyrings
@@ -426,7 +287,7 @@ sudo systemctl enable --now kubelet
 - `kubelet`：节点代理
 - `kubectl`：命令行管理工具
 
-### 6.3 手工打开内核参数并关闭 swap
+### 6.2 打开内核参数并关闭 swap
 
 ```bash
 sudo modprobe br_netfilter
@@ -449,7 +310,7 @@ sudo sed -i '/ swap / s/^/#/' /etc/fstab
 - 打开 IPv4 转发
 - 关闭 swap，满足 kubeadm 要求
 
-### 6.4 手工配置 containerd
+### 6.3 配置 containerd
 
 很多国内服务器初始化失败，根因是：
 
@@ -482,7 +343,7 @@ sudo systemctl restart containerd
 sudo systemctl restart kubelet
 ```
 
-### 6.5 初始化单节点集群
+### 6.4 初始化单节点集群
 
 ```bash
 sudo kubeadm init \
@@ -494,7 +355,7 @@ sudo kubeadm init \
 
 - `Your Kubernetes control-plane has initialized successfully!`
 
-### 6.6 配置当前用户的 kubectl
+### 6.5 配置当前用户的 kubectl
 
 ```bash
 mkdir -p $HOME/.kube
@@ -503,7 +364,7 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 kubectl get nodes
 ```
 
-### 6.7 允许工作负载调度到控制平面节点
+### 6.6 允许工作负载调度到控制平面节点
 
 单机部署必须执行：
 
@@ -517,7 +378,7 @@ kubectl taint nodes --all node-role.kubernetes.io/master-
 - 不同发行版或不同安装方式下，污点键可能是 `control-plane`，也可能是 `master`
 - 在单节点 Kubernetes 中，必须把这两类常见污点都移除，避免所有业务 Pod 因 `NoSchedule` 卡死
 
-### 6.8 安装 Flannel 网络插件
+### 6.7 安装 Flannel 网络插件
 
 ```bash
 cd /opt/hdu-ride
@@ -632,18 +493,23 @@ kubectl get storageclass
 
 ---
 
-## 8. 后续更新项目代码
+## 8. 获取项目代码
 
-前面第 `2.4` 节已经完成了首次克隆。
+统一把项目放到 `/opt/hdu-ride`。
 
-这里记录的是后续升级仓库代码时该怎么做。
+```bash
+cd /opt
+sudo git clone <你的仓库地址> hdu-ride
+sudo chown -R $USER:$USER /opt/hdu-ride
+cd /opt/hdu-ride
+```
+
+如果代码已经存在，后续升级用：
 
 ```bash
 cd /opt/hdu-ride
 git pull
 ```
-
-如果你不是直接部署官方仓库，而是使用自己的 fork 或私有仓库，也建议仍然统一放在 `/opt/hdu-ride`，避免与本文档中的所有路径说明不一致。
 
 ---
 
@@ -687,8 +553,8 @@ git pull
 ### 9.2 初始化内容目录
 
 ```bash
-cd /opt/hdu-ride
-test -d content/courses && echo "content 目录已就绪"
+mkdir -p /opt/hdu-ride/content
+test -d /opt/hdu-ride/content/courses && echo "content 目录已就绪"
 ```
 
 说明：
@@ -697,7 +563,6 @@ test -d content/courses && echo "content 目录已就绪"
 - `deploy/k8s/content-pvc-prod.yml` 会把 `/opt/hdu-ride/content` 直接挂载给后端容器
 - 所以后续管理员直接维护 `/opt/hdu-ride/content` 即可，不需要再做额外同步
 - 如果担心误操作，建议把 `/opt/hdu-ride` 纳入 Git 管理并定期备份
-- 如果这里 `test -d content/courses` 失败，不要先手工创建一个空目录，而应先检查仓库是否完整克隆成功
 
 ### 9.3 内容目录结构
 
@@ -1258,22 +1123,8 @@ assignments/
 
 ### 17.1 升级后端或前端代码
 
-如果你平时直接在服务器上修改了 `/opt/hdu-ride/content`，这里先不要急着 `git pull`。
-
-因为生产内容目录就在仓库里，直接 `git pull` 可能出现两类问题：
-
-1. 你本地改过的内容与远端改动冲突，导致拉取失败
-2. 你自己没提交的内容被覆盖
-
-更稳妥的做法是：
-
-- 先用 `git status` 看看工作区是否干净
-- 如果内容修改本来就应该长期保留，先提交到你自己的 Git 仓库
-- 如果只是临时改动，至少先手工备份 `/opt/hdu-ride/content`
-
 ```bash
 cd /opt/hdu-ride
-git status
 git pull
 ```
 
