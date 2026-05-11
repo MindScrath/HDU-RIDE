@@ -7,3 +7,4 @@ backend/hdu-ride-backend
 .env
 storage/
 tmp/
+.trae/
