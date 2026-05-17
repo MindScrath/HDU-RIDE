@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Document, Expand, Fold, Grid, Notebook, Setting, User } from '@element-plus/icons-vue'
+import { Document, Expand, Fold, Grid, Notebook, Setting, User, ChatDotRound } from '@element-plus/icons-vue'
 import { useSession } from './composables/useSession'
 
 const route = useRoute()
@@ -18,12 +18,14 @@ const nav = computed(() => [
   { key: 'classes', label: '班级', path: '/classes', icon: Grid },
   { key: 'lectures', label: '讲义', path: '/lectures', icon: Notebook },
   { key: 'assignments', label: '作业', path: '/assignments', icon: Document },
+  { key: 'agui', label: 'AI 助手', path: '/agui', icon: ChatDotRound },
   { key: 'admin', label: '管理', path: '/admin/users', icon: Setting, adminOnly: true }
 ])
 const activeNav = computed(() => {
   if (route.path.startsWith('/admin')) return 'admin'
   if (route.path.includes('/lectures')) return 'lectures'
   if (route.path.includes('/assignments')) return 'assignments'
+  if (route.path.startsWith('/agui')) return 'agui'
   return 'classes'
 })
 
