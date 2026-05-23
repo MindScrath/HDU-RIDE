@@ -23,7 +23,7 @@ pull_and_import() {
   fi
   sudo docker save "$target_image" -o "$archive_path" || return 1
   sudo ctr -n k8s.io images import "$archive_path" || return 1
-  rm -f "$archive_path"
+  sudo rm -f "$archive_path"
 }
 
 pull_with_fallbacks() {

@@ -31,6 +31,9 @@ type Config struct {
 	WorkspaceMemRequest   string
 	WorkspaceMemLimit     string
 	SessionTTL            time.Duration
+	// 阿里云百炼大模型（可选，未配置时 /api/ai/chat 返回 503）
+	BailianAPIKey string
+	BailianAppID  string
 }
 
 func loadConfig() (Config, error) {
@@ -60,6 +63,8 @@ func loadConfig() (Config, error) {
 		WorkspaceMemRequest:   requiredEnv("WORKSPACE_MEM_REQUEST"),
 		WorkspaceMemLimit:     requiredEnv("WORKSPACE_MEM_LIMIT"),
 		SessionTTL:            12 * time.Hour,
+		BailianAPIKey:         optionalEnv("BAILIAN_API_KEY"),
+		BailianAppID:          optionalEnv("BAILIAN_APP_ID"),
 	}
 	return cfg, nil
 }
@@ -128,6 +133,10 @@ func requiredEnv(key string) string {
 		panic("missing required environment variable: " + key)
 	}
 	return value
+}
+
+func optionalEnv(key string) string {
+	return strings.TrimSpace(os.Getenv(key))
 }
 
 func trimEndpoint(value string) string {

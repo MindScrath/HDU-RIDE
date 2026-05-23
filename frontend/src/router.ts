@@ -6,6 +6,7 @@ import LecturePage from './pages/LecturePage.vue'
 import AssignmentPage from './pages/AssignmentPage.vue'
 import AdminUsers from './pages/AdminUsers.vue'
 import AdminCourseImport from './pages/AdminCourseImport.vue'
+import AguiPage from './pages/AguiPage.vue'
 import { useSession } from './composables/useSession'
 
 const router = createRouter({
@@ -20,7 +21,8 @@ const router = createRouter({
     { path: '/classes/:classId/lectures/:lectureId?', component: LecturePage },
     { path: '/classes/:classId/assignments/:assignmentId?', component: AssignmentPage },
     { path: '/admin/users', component: AdminUsers },
-    { path: '/admin/courses', component: AdminCourseImport }
+    { path: '/admin/courses', component: AdminCourseImport },
+    { path: '/agui', component: AguiPage }
   ]
 })
 
