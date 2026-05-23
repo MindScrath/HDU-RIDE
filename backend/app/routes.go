@@ -1345,7 +1345,7 @@ func (a *App) reloadCourses(c *gin.Context) {
 		return
 	}
 	if err := a.content.Reload(a.cfg.WorkspaceImageDefault); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "course reload failed"})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "warning": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})

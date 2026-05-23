@@ -92,12 +92,23 @@ func loadCourses(root string, defaultImage string) (*CourseStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	var allWarnings []string
 	for _, file := range files {
 		course, err := loadCourse(filepath.Dir(file), defaultImage)
+		if err != nil && course == nil {
+			allWarnings = append(allWarnings, fmt.Sprintf("skip course at %s: %v", filepath.Dir(file), err))
+			continue
+		}
 		if err != nil {
-			return nil, err
+			allWarnings = append(allWarnings, err.Error())
 		}
 		store.courses[course.ID] = course
+	}
+	if len(store.courses) == 0 {
+		return nil, fmt.Errorf("no courses loaded; errors: %s", strings.Join(allWarnings, "; "))
+	}
+	if len(allWarnings) > 0 {
+		return store, fmt.Errorf("warnings: %s", strings.Join(allWarnings, "; "))
 	}
 	return store, nil
 }
@@ -141,11 +152,13 @@ func loadCourse(dir string, defaultImage string) (*CourseBundle, error) {
 	}
 	sort.Slice(course.Lectures, func(i, j int) bool { return course.Lectures[i].Order < course.Lectures[j].Order })
 
+	var warnings []string
 	for _, listed := range manifest.Assignments {
 		assignDir := filepath.Join(dir, "assignments", listed.ID)
 		meta, err := loadAssignment(assignDir, listed.Title, defaultImage)
 		if err != nil {
-			return nil, err
+			warnings = append(warnings, fmt.Sprintf("skip assignment %s: %v", listed.ID, err))
+			continue
 		}
 		course.Assignments = append(course.Assignments, meta)
 		course.byAssign[meta.ID] = assignmentFile{
@@ -155,6 +168,9 @@ func loadCourse(dir string, defaultImage string) (*CourseBundle, error) {
 		}
 	}
 	sort.Slice(course.Assignments, func(i, j int) bool { return course.Assignments[i].OpenAt.Before(course.Assignments[j].OpenAt) })
+	if len(warnings) > 0 {
+		return course, fmt.Errorf("course %s loaded with warnings: %s", manifest.ID, strings.Join(warnings, "; "))
+	}
 	return course, nil
 }
 
@@ -215,10 +231,13 @@ func (s *CourseStore) DefaultCourse() (*CourseBundle, bool) {
 
 func (s *CourseStore) Reload(defaultImage string) error {
 	next, err := loadCourses(s.root, defaultImage)
-	if err != nil {
+	if err != nil && next == nil {
 		return err
 	}
 	s.courses = next.courses
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -253,15 +272,17 @@ func renderMarkdownFile(path string) (string, error) {
 
 func stripFrontMatter(data []byte) []byte {
 	text := string(data)
-	if strings.HasPrefix(text, "---\r\n") {
-		if end := strings.Index(text[5:], "\r\n---\r\n"); end >= 0 {
-			return []byte(text[5+end+7:])
-		}
+	if !strings.HasPrefix(text, "---") {
+		return data
 	}
-	if strings.HasPrefix(text, "---\n") {
-		if end := strings.Index(text[4:], "\n---\n"); end >= 0 {
-			return []byte(text[4+end+5:])
-		}
+	// Normalise line endings for delimiter detection
+	normalised := strings.ReplaceAll(text, "\r\n", "\n")
+	if !strings.HasPrefix(normalised, "---\n") {
+		return data
 	}
-	return data
+	end := strings.Index(normalised[4:], "\n---\n")
+	if end < 0 {
+		return data
+	}
+	return []byte(text[4+end+5:])
 }

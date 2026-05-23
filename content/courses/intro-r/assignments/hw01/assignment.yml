@@ -1,7 +1,6 @@
 id: hw01
-title: 第一次作业：基础数据处理
-open_at: 2026-04-01 09:00
-due_at: 2026-04-15 23:59
+title: 第一次作业：CAPM 实证检验
+open_at: 2026-05-25 09:00
+due_at: 2026-06-08 23:59
 rstudio_image: rocker/rstudio:4.6.0
-starter: starter
-submit_path: .
+submit_path: ~

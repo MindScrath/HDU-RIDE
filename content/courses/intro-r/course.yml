@@ -38,8 +38,6 @@ chapters:
 
 assignments:
   - id: hw01
-    title: 第一次作业：基础数据处理
+    title: 第一次作业：CAPM 实证检验
   - id: hw02
-    title: 第二次作业：CAPM 实证检验
-  - id: hw03
-    title: 第三次作业：市场弱式有效检验
+    title: 第二次作业：市场弱式有效检验

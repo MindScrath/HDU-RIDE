@@ -46,8 +46,11 @@ func main() {
 	}
 
 	content, err := app.LoadCourses(cfg.ContentRoot, cfg.WorkspaceImageDefault)
-	if err != nil {
+	if err != nil && content == nil {
 		log.Fatal(err)
+	}
+	if err != nil {
+		log.Println("WARNING:", err)
 	}
 
 	objects, err := app.OpenObjectStore(ctx, cfg)

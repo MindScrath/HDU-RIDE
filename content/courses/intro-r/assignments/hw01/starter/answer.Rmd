@@ -1,9 +1,0 @@
----
-title: "HW01"
-output: html_document
----
-
-```{r}
-iris_sample <- read.csv("data/public/iris_sample.csv")
-head(iris_sample)
-```

@@ -162,7 +162,13 @@ kubectl logs -l app.kubernetes.io/name=hdu-ride-frontend -n hdu-ride --tail=200
 
 ## 4. 最短上线命令
 
-如果你只是改了前后端代码，通常直接执行下面这组命令即可：
+**如果你只改了 content/，不要用下面这组命令。请直接跳到第 8 节，或执行：**
+
+```bash
+bash scripts/update-content.sh
+```
+
+**以下仅适用于修改了前后端代码的情况：**
 
 ```bash
 cd /opt/hdu-ride
@@ -230,142 +236,167 @@ kubectl rollout restart deployment/hdu-ride-frontend -n hdu-ride
 kubectl rollout status deployment/hdu-ride-frontend -n hdu-ride --timeout=180s
 ```
 
-## 7. content 目录到底怎么用
+## 7. content 加载机制（理解这个才能排错）
 
-生产环境里，课程内容卷来自：
+### 7.1 数据流
 
-- Kubernetes PV: `deploy/k8s/content-pvc-prod.yml`
-- 宿主机实际目录：`/opt/hdu-ride/content`
-- 后端容器内挂载目录：`/content`
-
-也就是说，线上真正应该维护的是服务器上的：
-
-```text
-/opt/hdu-ride/content
+```
+宿主机 /opt/hdu-ride/content/
+    │
+    │  hostPath PV
+    ▼
+Kubernetes PVC hdu-ride-content
+    │
+    │  volumeMount /content
+    ▼
+后端容器 /content/
+    │
+    │  app.LoadCourses() 启动时加载到内存
+    ▼
+后端内存 (content.CourseStore) ◄── 前端 API 从这里读取
 ```
 
-不要做这些事：
+后端在**启动时**调用 `app.LoadCourses()` 扫描 `/content/courses/*/course.yml`，把所有章节课时和作业信息加载到内存。之后前端请求讲义列表、作业列表、渲染内容，全部走内存，不会再读磁盘。
 
-- 不要手工进后端 Pod 里改 `/content`
-- 不要把课程内容只改在你本地电脑上却不上传到服务器
-- 不要误以为重建前后端镜像会自动更新 `content`
+### 7.2 所以”改了文件但页面没变”是正常的
 
-因为：
+因为后端读的是**内存里的旧数据**。你改了磁盘上的 Markdown，后端不知道。必须触发**重载（reload）**，后端才会重新扫描目录、覆盖内存数据。
 
-- 生产环境 `content` 是独立的宿主机目录
-- 它和前后端镜像不是一回事
-- 改镜像不会覆盖它，删 Pod 也不会自动清空它
+### 7.3 课程加载的容错行为
 
-## 8. content 上线或更新的正确步骤
+如果一个课程的 `course.yml` 有 YAML 语法错误，**整个课程**会加载失败（后端启动时会打印 WARNING 日志，但仍然会继续运行其他课程）。
 
-适用于：
+如果一个课程中某个作业目录缺失或 `assignment.yml` 有误，**该作业会被跳过**，其他作业和章节仍然正常加载。重载 API 会返回具体的错误信息，告知哪个作业出了问题。
 
-- 修改讲义
-- 修改章节 Markdown
-- 修改课程配置
-- 修改作业说明
-- 修改 starter
-- 修改公开数据
-- 修改测试文件
+### 7.4 最常见的加载失败原因
 
-### 8.1 把新内容放到服务器的 `/opt/hdu-ride/content`
+| 现象 | 可能原因 |
+|------|----------|
+| 所有讲义都看不到 | course.yml 不在正确位置，或 YAML 缩进/语法错误 |
+| 某个章节点击后空白 | 对应的 `.md` 文件不存在或路径在 course.yml 中写错 |
+| 某个作业不显示 | `assignments/<id>/assignment.yml` 缺失、日期格式错误、或目录名与 course.yml 中 `id` 不一致 |
+| 全部课程消失 | `/content/courses/` 目录不存在，或没有任何 course.yml |
 
-你可以用任一方式更新：
+---
 
-- `git pull`
-- `scp` / `sftp`
-- VS Code Remote SSH
-- 直接在服务器编辑
+## 8. content 更新的正确步骤
 
-但最终目标都一样：让服务器上的这个目录变成最新内容。
+### 8.1 快速更新（推荐：使用脚本）
 
-例如：
+服务器上一键完成：
 
 ```bash
-cd /opt/hdu-ride/content
-find .
+cd /opt/hdu-ride
+bash scripts/update-content.sh
 ```
 
-你应该能在这里看到最新课程目录，例如 `courses/...`。
+这个脚本会：
+1. 执行 `git pull` 拉取最新 content
+2. 显示 content/ 的变更摘要
+3. 自动触发课程重载（优先尝试 API，失败时回退到重启 backend）
 
-### 8.2 内容更新后，不需要重建前后端镜像
+如果不想 git pull（比如已经手动更新了文件）：
 
-如果你改的只是 `content/`，通常不需要：
-
-- `docker build`
-- `ctr images import`
-- `kubectl rollout restart deployment/hdu-ride-frontend`
-
-因为页面代码和后端程序本身没有变。
-
-### 8.3 内容更新后，要让后端重新加载课程
-
-虽然生产内容目录是挂载的，但后端会把课程内容加载到内存里。
-
-所以你改完 `/opt/hdu-ride/content` 后，还要执行下面二选一。
-
-方式 A，推荐：
-
-- 用管理员登录系统
-- 进入课程管理页
-- 点击“重新加载”
-
-它会调用：
-
-```text
-POST /api/admin/courses/reload
+```bash
+bash scripts/update-content.sh --no-pull
 ```
 
-方式 B，备用：
+如果 API 重载不可用，直接用重启方式：
 
+```bash
+bash scripts/update-content.sh --restart
+```
+
+### 8.2 手动更新（分步操作）
+
+如果脚本不可用，手动执行以下步骤：
+
+**第一步：更新文件**
+
+```bash
+cd /opt/hdu-ride
+git pull
+```
+
+确认文件已更新：
+
+```bash
+ls /opt/hdu-ride/content/courses/
+cat /opt/hdu-ride/content/courses/intro-r/course.yml | head -10
+```
+
+**第二步：触发重载（二选一）**
+
+方式 A — 通过管理后台（推荐，无中断）：
+1. 用管理员账号登录
+2. 进入课程管理页
+3. 点击”重新加载”
+
+方式 B — 重启 backend（备用，有几秒中断）：
 ```bash
 kubectl rollout restart deployment/hdu-ride-backend -n hdu-ride
 kubectl rollout status deployment/hdu-ride-backend -n hdu-ride --timeout=180s
 ```
 
-如果后台“重新加载”可用，优先用方式 A，因为它只重载课程内容，不会多做无关重启。
+**第三步：验证**
 
-## 9. content 更新时的建议流程
+刷新浏览器页面，检查：
+- 讲义列表中是否出现新增的章节
+- 作业列表中是否出现新增的作业
+- 点击章节和作业，内容是否正确渲染
 
-### 9.1 只更新内容
+---
+
+## 9. 内容更新常见问题排查
+
+### 9.1 更新后全部讲义消失
+
+最可能的两个原因：
+
+1. **course.yml 有 YAML 语法错误** — 检查缩进是否用空格（不能用 Tab）、是否有中文冒号等特殊字符导致解析失败。
+2. **重载成功但报了 warning** — 打开浏览器 F12 Network 面板，查看 `/api/admin/courses/reload` 的返回值，如果有 `”warning”` 字段，里面会列出具体的加载问题。
+
+排查步骤：
 
 ```bash
+# 在服务器上检查 course.yml 是否能被 Go YAML 解析
 cd /opt/hdu-ride
-git pull
+grep -n “^[[:space:]]” content/courses/intro-r/course.yml | head -20
 
-# 确认服务器上的 content 已更新
-ls /opt/hdu-ride/content
+# 查看后端日志
+kubectl logs -l app.kubernetes.io/name=hdu-ride-backend -n hdu-ride --tail=50 | grep -i “warn\|error\|fail”
 ```
 
-然后：
+### 9.2 部分作业不显示
 
-1. 登录管理员后台
-2. 执行课程重新加载
-3. 打开网页确认内容已变化
+在 course.yml 中列出的每个作业，必须对应一个目录：
 
-### 9.2 既改代码，也改内容
+```text
+courses/<课程id>/assignments/<作业id>/
+    ├── assignment.yml    ← 必须有
+    └── README.md         ← 必须有
+```
 
-按下面顺序做最稳妥：
+常见错误：
+- course.yml 里写 `id: hw02`，但目录叫 `homework02` — 名字必须完全一致
+- `assignment.yml` 里的日期格式不是 `2026-05-25 09:00` — 必须精确到分钟
+- 目录权限问题导致后端读不了文件
 
-1. 更新 `/opt/hdu-ride` 代码
-2. 重建并导入前后端镜像
-3. 执行 `bash scripts/k8s-prod-up.sh`
-4. 执行 `kubectl rollout restart deployment/...`
-5. 确认新 Pod 正常
-6. 再执行一次课程重载
+### 9.3 讲义内容渲染异常
 
-这样可以避免你看到“代码已经是新的，但课程还是旧的”这种混合状态。
+如果页面显示了 YAML front matter 原始内容（比如看到 `title: xxx` 而不是正常标题），说明 front matter 解析出了问题。这可能是因为 Markdown 文件的换行符混合（Windows `\r\n` 和 Linux `\n` 混用）。确保文件中的 `---` 分隔符前后换行一致。
 
-## 10. 不建议在生产上使用 `scripts/k8s-sync-content.sh`
+---
 
-当前生产环境的内容卷已经是 `hostPath` 直接挂载 `/opt/hdu-ride/content`。
+## 10. 各环境 content 同步方式总结
 
-因此在生产机上，更新内容最直接的方法就是：
+| 环境 | content 在哪里 | 更新方式 |
+|------|---------------|----------|
+| **生产 (Ubuntu)** | 宿主机 `/opt/hdu-ride/content` → hostPath PV → Pod `/content` | `git pull` + 重载（或用 `scripts/update-content.sh`） |
+| **本地开发 (kind)** | Windows `content/` 目录 | `scripts/rideops.ps1 sync-content` → 复制到 PVC → 重载 |
+| **本地开发 (Podman 直接跑)** | 本地文件系统 | 后端直接读本地目录，修改后重载即可 |
 
-1. 直接更新 `/opt/hdu-ride/content`
-2. 然后执行课程重载
-
-不需要额外再跑一次 `scripts/k8s-sync-content.sh`。
+生产环境**不要**使用 `scripts/k8s-sync-content.sh`，因为生产用的是 `hostPath` PV——宿主机目录直接挂载进 Pod，不需要额外的 tar + kubectl exec 同步步骤。
 
 ## 11. 出问题时怎么强制换 Pod
 
@@ -433,6 +464,9 @@ kubectl get pvc -n hdu-ride
 1. 改了前后端代码后，没有把镜像导入 `containerd`
 2. 导入新镜像后，没有执行 `kubectl rollout restart deployment/...`
 
-而 `content` 的原则也只有一句话：
+而 `content` 的原则也只有三句话：
 
-- 生产以 `/opt/hdu-ride/content` 为准，改完后执行课程重载，不要去容器里手改文件
+- **生产以 `/opt/hdu-ride/content` 为准**，不要去容器里手改文件
+- **改完必须重载**，否则后端内存里还是旧数据——执行 `bash scripts/update-content.sh`，或通过管理后台点击"重新加载"
+- **重载报错时看 warning**，它会告诉你哪个作业或文件出了问题
+
