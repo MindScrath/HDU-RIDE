@@ -535,7 +535,7 @@ func (a *App) getGlobalLecture(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "course not found"})
 		return
 	}
-	html, err := course.RenderLecture(c.Param("lectureID"))
+	markdown, err := course.RenderLecture(c.Param("lectureID"))
 	if errors.Is(err, os.ErrNotExist) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "lecture not found"})
 		return
@@ -544,7 +544,7 @@ func (a *App) getGlobalLecture(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "lecture render failed"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"html": html})
+	c.JSON(http.StatusOK, gin.H{"markdown": markdown})
 }
 
 func (a *App) listLectures(c *gin.Context) {
@@ -560,7 +560,7 @@ func (a *App) getLecture(c *gin.Context) {
 	if !ok {
 		return
 	}
-	html, err := course.RenderLecture(c.Param("lectureID"))
+	markdown, err := course.RenderLecture(c.Param("lectureID"))
 	if errors.Is(err, os.ErrNotExist) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "lecture not found"})
 		return
@@ -569,7 +569,7 @@ func (a *App) getLecture(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "lecture render failed"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"html": html})
+	c.JSON(http.StatusOK, gin.H{"markdown": markdown})
 }
 
 func (a *App) listAssignments(c *gin.Context) {
@@ -585,7 +585,7 @@ func (a *App) getAssignment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	html, assignment, err := course.RenderAssignment(c.Param("assignmentID"))
+	markdown, assignment, err := course.RenderAssignment(c.Param("assignmentID"))
 	if errors.Is(err, os.ErrNotExist) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "assignment not found"})
 		return
@@ -595,7 +595,7 @@ func (a *App) getAssignment(c *gin.Context) {
 		return
 	}
 	status := a.assignmentStatus(c, c.Param("classID"), c.Param("assignmentID"))
-	c.JSON(http.StatusOK, gin.H{"assignment": assignment, "html": html, "status": status})
+	c.JSON(http.StatusOK, gin.H{"assignment": assignment, "markdown": markdown, "status": status})
 }
 
 func (a *App) submitAssignment(c *gin.Context) {

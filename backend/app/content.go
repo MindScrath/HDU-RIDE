@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/microcosm-cc/bluemonday"
-	"github.com/yuin/goldmark"
 	"gopkg.in/yaml.v3"
 )
 
@@ -263,11 +260,7 @@ func renderMarkdownFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var buf bytes.Buffer
-	if err := goldmark.Convert(stripFrontMatter(data), &buf); err != nil {
-		return "", err
-	}
-	return bluemonday.UGCPolicy().Sanitize(buf.String()), nil
+	return string(stripFrontMatter(data)), nil
 }
 
 func stripFrontMatter(data []byte) []byte {

@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus'
 import { Close, FullScreen } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { useSession } from '../composables/useSession'
+import { useMarkdown } from '../composables/useMarkdown'
 import type { Assignment, ClassItem, Submission } from '../types'
 
 interface AssignmentEntry {
@@ -24,9 +25,10 @@ interface SubmissionRow {
 const route = useRoute()
 const router = useRouter()
 const session = useSession()
+const { render } = useMarkdown()
 const classes = ref<ClassItem[]>([])
 const entries = ref<AssignmentEntry[]>([])
-const html = ref('')
+const raw = ref('')
 const status = ref<Record<string, unknown>>({})
 const rows = ref<SubmissionRow[]>([])
 const workspaceURL = ref('')
@@ -61,6 +63,15 @@ const selectedEntry = computed(() => {
 })
 const activeClassId = computed(() => classIdParam.value || selectedEntry.value?.classId || '')
 const selectedAssignment = computed(() => selectedEntry.value?.assignment)
+const renderedHtml = computed(() => {
+  if (!raw.value) return ''
+  try {
+    return render(raw.value)
+  } catch (e) {
+    console.error('markdown render failed', e)
+    return '<p style="color:red">Markdown 渲染失败</p>'
+  }
+})
 const latestRows = computed(() => {
   const byUser = new Map<string, SubmissionRow>()
   for (const row of rows.value) {
@@ -122,10 +133,10 @@ function chooseClass() {
 
 async function loadAssignment() {
   if (!selected.value || !activeClassId.value) return
-  const data = await api.get<{ assignment: Assignment; html: string; status: Record<string, unknown> }>(
+  const data = await api.get<{ assignment: Assignment; markdown: string; status: Record<string, unknown> }>(
     `/api/classes/${activeClassId.value}/assignments/${selected.value}`
   )
-  html.value = data.html
+  raw.value = data.markdown
   status.value = data.status
   promptOpen.value = isStudent.value
   selectedSubmission.value = null
@@ -319,7 +330,7 @@ async function exportGrades() {
           <strong>作业题面</strong>
           <span>{{ promptOpen ? '收起' : '展开' }}</span>
         </button>
-        <div v-show="promptOpen" class="markdown" v-html="html" />
+        <div v-show="promptOpen" class="markdown" v-html="renderedHtml" />
       </div>
 
       <div v-if="isStudent" class="student-submit">

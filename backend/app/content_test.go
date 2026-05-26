@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadCoursesAndSanitizeMarkdown(t *testing.T) {
+func TestLoadCoursesAndRenderMarkdown(t *testing.T) {
 	root := t.TempDir()
 	courseDir := filepath.Join(root, "courses", "intro-r")
 	writeTestFile(t, filepath.Join(courseDir, "course.yml"), `
@@ -49,15 +49,15 @@ submit_path: .
 	if len(course.Lectures) != 1 || len(course.Lectures[0].Sections) != 1 || len(course.Assignments) != 1 {
 		t.Fatalf("unexpected course shape: %+v", course)
 	}
-	html, err := course.RenderLecture("welcome")
+	markdown, err := course.RenderLecture("welcome")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(html, "<script>") {
-		t.Fatalf("unsafe script was not removed: %s", html)
+	if strings.Contains(markdown, "title: Welcome") {
+		t.Fatalf("front matter was rendered: %s", markdown)
 	}
-	if strings.Contains(html, "title: Welcome") {
-		t.Fatalf("front matter was rendered: %s", html)
+	if !strings.Contains(markdown, "<script>") {
+		t.Fatalf("raw markdown should contain unmodified script tag: %s", markdown)
 	}
 }
 
