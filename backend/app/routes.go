@@ -77,7 +77,7 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api.POST("/admin/courses/import", app.importCourse)
 	api.POST("/admin/courses/reload", app.reloadCourses)
 	api.POST("/ai/chat", app.chatAI)
-
+	api.POST("/ai/upload", app.uploadAIFile)
 
 	router.Any("/ide/s/:workspaceID/*path", requireSession(app.db, app.cfg), workspaceGateway(app.db, app.cfg))
 }

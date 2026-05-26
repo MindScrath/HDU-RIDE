@@ -1,43 +1,61 @@
-id: intro-r
-title: R 语言入门
-description: 面向计量金融课程的 R 语言基础、数据处理与可视化训练
+id: financial-econometrics
+title: 金融计量与人工智能应用实验
+description: 面向金融学、经济学本科生的金融计量学教材，涵盖时间序列分析、ARMA模型、波动率建模等核心内容，结合R语言与AI辅助编程
 
 chapters:
-  - id: r-foundation
-    title: 第1章 R 语言基础
+  - id: ch01-intro
+    title: 第1章 导论
     order: 1
     sections:
-      - id: welcome
-        file: chapters/01-welcome.md
-        title: 1.1 课程介绍
+      - id: intro
+        file: chapters/ch01-intro.md
+        title: 第1章 导论
         order: 1
-      - id: dataframe
-        file: chapters/02-data-frame.md
-        title: 1.2 数据框与 tibble
-        order: 2
-  - id: visualization
-    title: 第2章 可视化基础
+  - id: ch02-ts-basics
+    title: 第2章 时间序列基础
     order: 2
     sections:
-      - id: plot
-        file: chapters/03-plot.md
-        title: 2.1 收益率可视化
+      - id: ts-basics
+        file: chapters/ch02-ts-basics.md
+        title: 第2章 时间序列基础
         order: 1
-  - id: finance-app
-    title: 第3章 金融应用
+  - id: ch03-arma
+    title: 第3章 ARMA过程
     order: 3
     sections:
-      - id: capm
-        file: chapters/04-capm.md
-        title: 3.1 CAPM 模型与实证检验
+      - id: arma
+        file: chapters/ch03-arma.md
+        title: 第3章 ARMA过程
         order: 1
-      - id: efficiency
-        file: chapters/05-efficiency.md
-        title: 3.2 市场弱式有效检验
-        order: 2
-
-assignments:
-  - id: hw01
-    title: 第一次作业：CAPM 实证检验
-  - id: hw02
-    title: 第二次作业：市场弱式有效检验
+  - id: ch04-univariate
+    title: 第4章 一元时间序列分析
+    order: 4
+    sections:
+      - id: univariate
+        file: chapters/ch04-univariate.md
+        title: 第4章 一元时间序列分析
+        order: 1
+  - id: ch05-regression
+    title: 第5章 时间序列回归模型
+    order: 5
+    sections:
+      - id: regression
+        file: chapters/ch05-regression.md
+        title: 第5章 时间序列回归模型
+        order: 1
+  - id: ch06-multivariate
+    title: 第6章 多元时间序列分析
+    order: 6
+    sections:
+      - id: multivariate
+        file: chapters/ch06-multivariate.md
+        title: 第6章 多元时间序列分析
+        order: 1
+  - id: ch07-volatility
+    title: 第7章 波动模型
+    order: 7
+    sections:
+      - id: volatility
+        file: chapters/ch07-volatility.md
+        title: 第7章 波动模型
+        order: 1

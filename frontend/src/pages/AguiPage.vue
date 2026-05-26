@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, nextTick, computed } from 'vue'
-import { ChatDotRound, Delete, Plus, CopyDocument, Promotion } from '@element-plus/icons-vue'
+import { ChatDotRound, Delete, Plus, CopyDocument, Promotion, Paperclip, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useSession } from '../composables/useSession'
 
@@ -56,6 +56,57 @@ function selectConversation(id: string) {
   activeId.value = id
 }
 
+// ── 附件上传 ──────────────────────────────────────────────
+interface AttachedFile {
+  fileId: string
+  fileName: string
+}
+const attachedFiles = ref<AttachedFile[]>([])
+const isUploading = ref(false)
+const fileInputEl = ref<HTMLInputElement | null>(null)
+
+function triggerFileInput() {
+  fileInputEl.value?.click()
+}
+
+async function handleFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  input.value = '' // reset
+
+  if (file.size > 50 * 1024 * 1024) {
+    ElMessage.error('文件不能超过 50 MB')
+    return
+  }
+
+  isUploading.value = true
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    const resp = await fetch('/api/ai/upload', {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: '上传失败' }))
+      throw new Error(err.error ?? '上传失败')
+    }
+    const data = await resp.json()
+    attachedFiles.value.push({ fileId: data.fileId, fileName: data.fileName })
+    ElMessage.success(`已上传: ${data.fileName}`)
+  } catch (e: any) {
+    ElMessage.error(e.message ?? '文件上传失败')
+  } finally {
+    isUploading.value = false
+  }
+}
+
+function removeFile(idx: number) {
+  attachedFiles.value.splice(idx, 1)
+}
+
 // ── 输入与发送 ─────────────────────────────────────────────
 const inputText = ref('')
 const isStreaming = ref(false)
@@ -97,6 +148,10 @@ async function send() {
   conv.messages.push(assistantMsg)
   isStreaming.value = true
 
+  // 收集附件 ID 并清空
+  const fileIds = attachedFiles.value.map(f => f.fileId)
+  attachedFiles.value = []
+
   try {
     const resp = await fetch('/api/ai/chat', {
       method: 'POST',
@@ -104,8 +159,9 @@ async function send() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: conv.messages
-          .slice(0, -1) // 不含占位 assistant
-          .map(m => ({ role: m.role, content: m.content }))
+          .slice(0, -1)
+          .map(m => ({ role: m.role, content: m.content })),
+        fileIds: fileIds.length > 0 ? fileIds : undefined
       })
     })
 
@@ -290,8 +346,33 @@ function renderMarkdown(text: string): string {
         </div>
       </div>
 
+      <!-- 附件预览 -->
+      <div v-if="attachedFiles.length > 0" class="agui-files">
+        <div v-for="(f, i) in attachedFiles" :key="f.fileId" class="agui-file-chip">
+          <span class="agui-file-name">📎 {{ f.fileName }}</span>
+          <button class="agui-file-remove" @click="removeFile(i)">
+            <el-icon :size="12"><Close /></el-icon>
+          </button>
+        </div>
+      </div>
+
       <!-- 输入框 -->
       <div class="agui-input-area">
+        <input
+          ref="fileInputEl"
+          type="file"
+          style="display:none"
+          @change="handleFileSelect"
+        />
+        <button
+          class="agui-attach-btn"
+          title="上传附件"
+          :disabled="isUploading || isStreaming"
+          @click="triggerFileInput"
+        >
+          <el-icon><Paperclip /></el-icon>
+          <span v-if="isUploading" class="agui-upload-spin">⏳</span>
+        </button>
         <textarea
           v-model="inputText"
           class="agui-textarea"
@@ -674,5 +755,71 @@ function renderMarkdown(text: string): string {
   font-size: 11px;
   color: #b0bcc8;
   margin: 4px 0 10px;
+}
+
+/* 附件 */
+.agui-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 16px 6px;
+  padding: 0 14px;
+}
+.agui-file-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #eaf2ff;
+  border: 1px solid #c4d9f5;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #1a2236;
+}
+.agui-file-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agui-file-remove {
+  border: 0;
+  background: transparent;
+  color: #9aacbf;
+  cursor: pointer;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  transition: color .12s;
+}
+.agui-file-remove:hover { color: #ef4444; }
+
+.agui-attach-btn {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #d4dcea;
+  background: transparent;
+  color: #5a6782;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  transition: background .15s, color .15s;
+  position: relative;
+}
+.agui-attach-btn:hover { background: #eaf2ff; color: #0b5ed7; border-color: #b0caed; }
+.agui-attach-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.agui-upload-spin {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 12px;
+  animation: agui-spin 1s infinite linear;
+}
+@keyframes agui-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

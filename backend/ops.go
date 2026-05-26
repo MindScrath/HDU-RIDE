@@ -331,6 +331,8 @@ func applySecrets(namespace, rootPasswordHash string) error {
 		"WORKSPACE_CPU_LIMIT":     envDefault("WORKSPACE_CPU_LIMIT", "1"),
 		"WORKSPACE_MEM_REQUEST":   envDefault("WORKSPACE_MEM_REQUEST", "1Gi"),
 		"WORKSPACE_MEM_LIMIT":     envDefault("WORKSPACE_MEM_LIMIT", "2Gi"),
+		"BAILIAN_API_KEY":         os.Getenv("BAILIAN_API_KEY"),
+		"BAILIAN_APP_ID":          os.Getenv("BAILIAN_APP_ID"),
 	})
 }
 
