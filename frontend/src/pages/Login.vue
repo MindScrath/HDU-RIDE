@@ -25,7 +25,7 @@ async function submit() {
         <span class="brand-mark">R</span>
         <div>
           <strong>HDU RIDE</strong>
-          <small>计量金融 R 教学平台</small>
+          <small>金融计量分析教学平台</small>
         </div>
       </div>
       <el-form label-position="top" @submit.prevent="submit">
