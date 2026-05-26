@@ -24,18 +24,26 @@ $$E(y_t) = \mu + 0 + 0 + \cdots + 0 = \mu$$
 
 **(2) 方差**
 由于不同时刻的白噪声互相独立，它们之间的协方差期望为 0：
-$$Var(y_t) &= E[(y_t - \mu)^2] \\
+$$
+\begin{aligned}
+Var(y_t) &= E[(y_t - \mu)^2] \\
 &= E[(\varepsilon_t + \theta_1 \varepsilon_{t-1} + \cdots + \theta_q \varepsilon_{t-q})^2] \\
 &= Var(\varepsilon_t) + \theta_1^2 Var(\varepsilon_{t-1}) + \cdots + \theta_q^2 Var(\varepsilon_{t-q}) \\
-&= (1 + \theta_1^2 + \cdots + \theta_q^2)\sigma^2$$
+&= (1 + \theta_1^2 + \cdots + \theta_q^2)\sigma^2
+\end{aligned}
+$$
 方差也是一个与时间无关的常数。
 
 **(3) 自协方差与自相关函数 (ACF)**
 对于 MA(1) 过程：
 当滞后 $k=1$ 时，自协方差为：
-$$\gamma_1 &= Cov(y_t, y_{t-1}) \\
+$$
+\begin{aligned}
+\gamma_1 &= Cov(y_t, y_{t-1}) \\
 &= E[(\varepsilon_t + \theta_1 \varepsilon_{t-1})(\varepsilon_{t-1} + \theta_1 \varepsilon_{t-2})] \\
-&= \theta_1 E(\varepsilon_{t-1}^2) = \theta_1 \sigma^2$$
+&= \theta_1 E(\varepsilon_{t-1}^2) = \theta_1 \sigma^2
+\end{aligned}
+$$
 此时，自相关系数 $\rho_1$ 为：
 $$\rho_1 = \frac{\gamma_1}{\gamma_0} = \frac{\theta_1 \sigma^2}{(1 + \theta_1^2)\sigma^2} = \frac{\theta_1}{1 + \theta_1^2}$$
 当 $k \ge 2$ 时，由于 $y_t$ 和 $y_{t-k}$ 之间没有任何重叠的历史白噪声项，所以 $\gamma_k = 0$，$\rho_k = 0$。
@@ -68,8 +76,12 @@ $$y_t = c + \phi y_{t-1} + \varepsilon_t$$
 我们回到时间 $t-1$ 期时，方程可以写成：
 $$y_{t-1} = c + \phi y_{t-2} + \varepsilon_{t-1}$$
 将上式代入 $y_t$ 的方程中，可以得到：
-$$y_t &= c + \phi(c + \phi y_{t-2} + \varepsilon_{t-1}) + \varepsilon_t \\
-&= c + \phi c + \phi^2 y_{t-2} + \varepsilon_t + \phi \varepsilon_{t-1}$$
+$$
+\begin{aligned}
+y_t &= c + \phi(c + \phi y_{t-2} + \varepsilon_{t-1}) + \varepsilon_t \\
+&= c + \phi c + \phi^2 y_{t-2} + \varepsilon_t + \phi \varepsilon_{t-1}
+\end{aligned}
+$$
 按照这个思路，对 $y_{t-2}, y_{t-3}, \cdots, y_{t-n}$ 继续做不断的迭代替换，可以得到:
 $$y_t = (1 + \phi + \phi^2 + \cdots + \phi^n)c + \phi^{n+1} y_{t-n-1} + \varepsilon_t + \phi \varepsilon_{t-1} + \phi^2 \varepsilon_{t-2} + \cdots + \phi^n \varepsilon_{t-n}$$
 

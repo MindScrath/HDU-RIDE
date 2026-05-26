@@ -96,10 +96,14 @@ $$
 随机游走过程可以视为过去所有白噪声的简单求和。设 $\{\varepsilon_t\}$ 为均值为 0、方差为 $\sigma^2$ 的白噪声序列，随机游走 $\{Y_t\}$ 定义为：
 $$Y_t = Y_{t-1} + \varepsilon_t$$
 这说明，今天的价格等于昨天的价格加上一个完全随机的白噪声冲击。为了便于分析，假设初始状态 $Y_0 = 0$，我们可以通过迭代法将 $Y_t$ 展开：
-$$Y_1 &= Y_0 + \varepsilon_1 = \varepsilon_1 \\
+$$
+\begin{aligned}
+Y_1 &= Y_0 + \varepsilon_1 = \varepsilon_1 \\
 Y_2 &= Y_1 + \varepsilon_2 = \varepsilon_1 + \varepsilon_2 \\
 &\vdots \\
-Y_t &= \varepsilon_1 + \varepsilon_2 + \cdots + \varepsilon_t = \sum_{i=1}^t \varepsilon_i$$
+Y_t &= \varepsilon_1 + \varepsilon_2 + \cdots + \varepsilon_t = \sum_{i=1}^t \varepsilon_i
+\end{aligned}
+$$
 可见，随机游走确实是白噪声的累积求和过程。
 
 ### 2.4.2 随机游走的统计特征
@@ -117,14 +121,22 @@ $$Var(Y_t) = Var\left(\sum_{i=1}^t \varepsilon_i\right) = \sum_{i=1}^t Var(\vare
 
 **(3) 自协方差与自相关函数**
 对于滞后期数 $k > 0$：
-$$Cov(Y_t, Y_{t-k}) &= Cov(Y_{t-k} + \varepsilon_{t-k+1} + \cdots + \varepsilon_t, Y_{t-k})$$
+$$
+\begin{aligned}
+Cov(Y_t, Y_{t-k}) &= Cov(Y_{t-k} + \varepsilon_{t-k+1} + \cdots + \varepsilon_t, Y_{t-k})
+\end{aligned}
+$$
 因为后期的白噪声与前期的状态无关（即 $Cov(\varepsilon_i, Y_{t-k}) = 0, \forall i > t-k$），所以：
 $$Cov(Y_t, Y_{t-k}) = Cov(Y_{t-k}, Y_{t-k}) = Var(Y_{t-k}) = (t-k)\sigma^2$$
 
 自相关函数为：
-$$\rho_{t, t-k} &= \frac{Cov(Y_t, Y_{t-k})}{\sqrt{Var(Y_t)} \sqrt{Var(Y_{t-k})}} \\
+$$
+\begin{aligned}
+\rho_{t, t-k} &= \frac{Cov(Y_t, Y_{t-k})}{\sqrt{Var(Y_t)} \sqrt{Var(Y_{t-k})}} \\
 &= \frac{(t-k)\sigma^2}{\sqrt{t\sigma^2} \sqrt{(t-k)\sigma^2}} \\
-&= \sqrt{\frac{t-k}{t}} = \sqrt{1 - \frac{k}{t}}$$
+&= \sqrt{\frac{t-k}{t}} = \sqrt{1 - \frac{k}{t}}
+\end{aligned}
+$$
 可以看出，当 $t$ 很大而 $k$ 相对较小时，$\rho_{t, t-k} \approx 1$。这说明随机游走序列的记忆性非常强，当期状态与前几期状态高度相关，且其相关性随时间推移衰减得极其缓慢。
 
 ### 2.4.3 差分处理与过差分问题 (含R代码演示)
@@ -137,9 +149,13 @@ $$\Delta Y_t = Y_t - Y_{t-1} = \varepsilon_t$$
 但是，差分次数并不是越多越好。如果我们对已经平稳的白噪声再进行一次差分（即对原序列进行二阶差分）：
 $$\Delta^2 Y_t = \Delta Y_t - \Delta Y_{t-1} = \varepsilon_t - \varepsilon_{t-1}$$
 我们来计算二阶差分后的方差：
-$$Var(\Delta^2 Y_t) &= Var(\varepsilon_t - \varepsilon_{t-1}) \\
+$$
+\begin{aligned}
+Var(\Delta^2 Y_t) &= Var(\varepsilon_t - \varepsilon_{t-1}) \\
 &= Var(\varepsilon_t) + Var(\varepsilon_{t-1}) \\
-&= 2\sigma^2$$
+&= 2\sigma^2
+\end{aligned}
+$$
 我们发现，方差不仅没有变小，反而变大了一倍！这就是所谓的**过差分（Over-differencing）**问题。过差分不仅会放大系统的噪声方差，还会人为引入不必要的负相关性，增加后续建模的难度。
 
 我们可以通过 R 语言来进行具体的模拟和比较。

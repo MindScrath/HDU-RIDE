@@ -56,7 +56,11 @@ $$FV_n = P_0(1 + nR)$$
 第一年年末，账户总额为：
 $$FV_1 = P_0(1 + R)$$
 第二年年末，是以第一年年末的总额 $FV_1$ 作为新的本金来计算利息，因此：
-$$FV_2 &= FV_1(1 + R) \\&= P_0(1 + R)(1 + R) \\&= P_0(1 + R)^2$$
+$$
+\begin{aligned}
+FV_2 &= FV_1(1 + R) \\&= P_0(1 + R)(1 + R) \\&= P_0(1 + R)^2
+\end{aligned}
+$$
 依此类推，$n$ 年后的终值为：
 $$FV_n = P_0(1 + R)^n$$
 
@@ -72,7 +76,11 @@ $$FV_n = P_0(1 + \frac{R}{m})^{m \times n}$$
 
 现在，让我们进行一个极限思考：如果计息的频次无限大，即 $m \rightarrow \infty$，也就是每一分、每一秒、甚至每一个无穷小的瞬间都在计息，终值会变成多少呢？
 我们将上述公式稍作变形，令 $k = \frac{m}{R}$，则当 $m \rightarrow \infty$ 时，$k \rightarrow \infty$：
-$$FV_n &= \lim_{m \to \infty} P_0(1 + \frac{R}{m})^{m \times n} \\&= P_0 \lim_{k \to \infty} \left[ (1 + \frac{1}{k})^k \right]^{R \times n}$$
+$$
+\begin{aligned}
+FV_n &= \lim_{m \to \infty} P_0(1 + \frac{R}{m})^{m \times n} \\&= P_0 \lim_{k \to \infty} \left[ (1 + \frac{1}{k})^k \right]^{R \times n}
+\end{aligned}
+$$
 根据微积分中的重要极限，我们知道自然底数 $e$ 的定义为：
 $$\lim_{k \to \infty} (1 + \frac{1}{k})^k = e \approx 2.71828$$
 将自然底数代入，我们得到了金融学中极其重要的**连续复利终值公式**：
@@ -94,7 +102,11 @@ $$1 + R_t = \frac{P_t}{P_{t-1}}$$
 
 简单收益率非常符合直觉，但它在多期计算时存在一个明显的缺点：不具备时间可加性。
 假设有两期收益，第一期总收益为 $1+R_1 = \frac{P_1}{P_0}$，第二期总收益为 $1+R_2 = \frac{P_2}{P_1}$。那么两期的累积总收益率为：
-$$1 + R_c &= \frac{P_2}{P_0} \\&= \frac{P_1}{P_0} \times \frac{P_2}{P_1} \\&= (1+R_1)(1+R_2) \\&= 1 + R_1 + R_2 + R_1R_2$$
+$$
+\begin{aligned}
+1 + R_c &= \frac{P_2}{P_0} \\&= \frac{P_1}{P_0} \times \frac{P_2}{P_1} \\&= (1+R_1)(1+R_2) \\&= 1 + R_1 + R_2 + R_1R_2
+\end{aligned}
+$$
 可以看出，两期的累积净收益率 $R_c \neq R_1 + R_2$，它是一个乘积的形式，这在处理长期数据时会带来很多数学上的不便。
 
 **(2) 对数收益率 (Log Return 或 Continuously Compounded Return)**
@@ -105,7 +117,11 @@ $$r_t = \ln(1 + R_t) = \ln(\frac{P_t}{P_{t-1}}) = \ln(P_t) - \ln(P_{t-1})$$
 $$r_t = p_t - p_{t-1}$$
 
 对数收益率完美地解决了时间可加性的问题。考察两期的累积对数收益率：
-$$r_c &= \ln(\frac{P_2}{P_0}) \\&= \ln(\frac{P_1}{P_0} \times \frac{P_2}{P_1}) \\&= \ln(\frac{P_1}{P_0}) + \ln(\frac{P_2}{P_1}) \\&= r_1 + r_2$$
+$$
+\begin{aligned}
+r_c &= \ln(\frac{P_2}{P_0}) \\&= \ln(\frac{P_1}{P_0} \times \frac{P_2}{P_1}) \\&= \ln(\frac{P_1}{P_0}) + \ln(\frac{P_2}{P_1}) \\&= r_1 + r_2
+\end{aligned}
+$$
 推广到 $k$ 期，多期的对数收益率等于各期对数收益率之和：
 $$r_c = r_1 + r_2 + \cdots + r_k$$
 这一“可加性”的优美性质，使得对数收益率成为了金融计量学研究中的“标准配置”。本书后续章节中所提到的“收益率”，除非特别说明，均指代**对数收益率**。
