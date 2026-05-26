@@ -33,13 +33,21 @@ function saveConversations() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations))
 }
 
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+  })
+}
+
 const conversations = reactive<Conversation[]>(loadConversations())
 const activeId = ref<string | null>(conversations[0]?.id ?? null)
 
 const activeConv = computed(() => conversations.find(c => c.id === activeId.value) ?? null)
 
 function newConversation() {
-  const id = crypto.randomUUID()
+  const id = generateId()
   conversations.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() })
   activeId.value = id
   saveConversations()
