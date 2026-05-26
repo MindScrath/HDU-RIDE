@@ -59,3 +59,9 @@ chapters:
         file: chapters/ch07-volatility.md
         title: 第7章 波动模型
         order: 1
+
+assignments:
+  - id: hw01
+    title: 第一次作业：CAPM 实证检验
+  - id: hw02
+    title: 第二次作业：市场弱式有效检验
