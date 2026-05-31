@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   async rewrites() {
     const goBackend = process.env.NEXT_PUBLIC_GO_API_URL ?? 'http://localhost:8080'
     return [
