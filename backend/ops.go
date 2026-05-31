@@ -462,7 +462,7 @@ func looksLikeRepoRoot(dir string) bool {
 	markers := []string{
 		filepath.Join(dir, "README.md"),
 		filepath.Join(dir, "backend", "main.go"),
-		filepath.Join(dir, "frontend", "package.json"),
+		filepath.Join(dir, "frontend-react", "package.json"),
 		filepath.Join(dir, "deploy", "k8s", "backend.yml"),
 	}
 	for _, marker := range markers {
