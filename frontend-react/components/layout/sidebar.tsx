@@ -1,8 +1,8 @@
 // components/layout/sidebar.tsx
 'use client'
 
-import { useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useSidebar } from './sidebar-context'
 import Link from 'next/link'
 import { Grid, Notebook, FileText, Settings, MessageCircle, Expand, PanelLeftClose } from 'lucide-react'
 import { useSession } from '@/stores/session'
@@ -19,7 +19,7 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const isAdmin = useSession((s) => s.isAdmin)
-  const [collapsed, setCollapsed] = useState(false)
+  const { collapsed, setCollapsed } = useSidebar()
 
   const activeNav = (() => {
     if (pathname.startsWith('/admin')) return 'admin'
