@@ -32,4 +32,4 @@ spec:
   ports:
     - port: 80
       targetPort: 3000
-      nodePort: 30000
+      nodePort: 30080
