@@ -46,12 +46,10 @@ func main() {
 	}
 
 	content, err := app.LoadCourses(cfg.ContentRoot, cfg.WorkspaceImageDefault)
-	if err != nil && content == nil {
-		log.Fatal(err)
-	}
 	if err != nil {
 		log.Println("WARNING:", err)
 	}
+	// content 可能为 nil（无课程），后续路由会返回空列表，不阻塞启动
 
 	objects, err := app.OpenObjectStore(ctx, cfg)
 	if err != nil {

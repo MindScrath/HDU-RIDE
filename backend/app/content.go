@@ -102,7 +102,7 @@ func loadCourses(root string, defaultImage string) (*CourseStore, error) {
 		store.courses[course.ID] = course
 	}
 	if len(store.courses) == 0 {
-		return nil, fmt.Errorf("no courses loaded; errors: %s", strings.Join(allWarnings, "; "))
+		return store, fmt.Errorf("no courses loaded; errors: %s", strings.Join(allWarnings, "; "))
 	}
 	if len(allWarnings) > 0 {
 		return store, fmt.Errorf("warnings: %s", strings.Join(allWarnings, "; "))
