@@ -1,3 +1,0 @@
-[install]
-backend = "copyfile"
-ignore-scripts = true
