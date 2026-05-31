@@ -4,7 +4,7 @@ export default async function GlobalAssignmentPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ assignmentId?: string[] }>
+  params: Promise<{ assignmentId: string[] }>
   searchParams: Promise<{ classId?: string }>
 }) {
   const { assignmentId } = await params

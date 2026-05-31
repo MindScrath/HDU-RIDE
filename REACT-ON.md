@@ -137,6 +137,14 @@ source ~/.bashrc
 bun --version
 ```
 
+> **Docker 构建前提**：项目使用 npm 创建（有 `package-lock.json`），但 Dockerfile 基于 Bun。构建镜像前必须先运行：
+>
+> ```bash
+> cd /opt/hdu-ride/frontend-react && bun install
+> ```
+>
+> 这会生成 `bun.lock`，Docker 构建时才能正确 `COPY` 并安装依赖。
+
 ---
 
 ## 6. 安装 Kubernetes
@@ -202,9 +210,11 @@ kubectl get nodes
 ### 6.6 允许调度到控制平面（单节点必须）
 
 ```bash
-kubectl taint nodes --all node-role.kubernetes.io/control-plane-
-kubectl taint nodes --all node-role.kubernetes.io/master-
+kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
+kubectl taint nodes --all node-role.kubernetes.io/master- || true
 ```
+
+> `|| true` 是为了忽略 "not found" 错误——新版本 K8s 用 `control-plane`，旧版本用 `master`，你的集群可能只有其中一个 taint。报 `taint not found` 是正常的，说明没有需要移除的 taint。
 
 ### 6.7 安装 Flannel 网络
 
@@ -262,6 +272,8 @@ cd /opt/hdu-ride
 cp .env.example .env
 nano .env
 ```
+
+> **注意**：`.env.example` 可能尚未包含 AI 助手和镜像名变量（`BAILIAN_API_KEY`、`BAILIAN_APP_ID`、`BACKEND_IMAGE`、`FRONTEND_IMAGE`）。如果复制后缺少这些字段，请参照下方 9.2 节的完整模板手动添加到 `.env` 末尾。
 
 ### 9.2 必须修改的字段
 
@@ -351,6 +363,11 @@ sudo systemctl restart docker
 
 ```bash
 cd /opt/hdu-ride
+
+# ① 构建前端前，先生成 bun.lock（项目由 npm 创建，Dockerfile 基于 Bun）
+cd frontend-react && bun install && cd ..
+
+# ② 构建镜像
 sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
 sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
 ```
@@ -548,6 +565,7 @@ BAILIAN_APP_ID=xxxxxxxxxxxxxxxx
 ```env
 BAILIAN_API_KEY=sk-xxxxxxxxxxxxxxxx
 BAILIAN_APP_ID=xxxxxxxxxxxxxxxx
+NEXT_PUBLIC_GO_API_URL=http://localhost:8080
 ```
 
 ### 15.3 切换模型
@@ -707,6 +725,7 @@ cd backend && go run . hash-password '你的密码' && cd ..
 # 把输出的哈希填入 .env 的 ROOT_PASSWORD_HASH
 
 # === 第 8 步：构建 + 导入镜像 ===
+cd frontend-react && bun install && cd ..   # 生成 bun.lock（必须）
 sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
 sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
 sudo docker pull postgres:18-alpine && sudo docker pull minio/minio:latest
