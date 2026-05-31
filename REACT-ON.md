@@ -369,7 +369,9 @@ cd frontend-react && bun install && cd ..
 
 # ② 构建镜像
 sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
-sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
+sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile \
+  --build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080 \
+  .
 ```
 
 说明：
@@ -727,7 +729,9 @@ cd backend && go run . hash-password '你的密码' && cd ..
 # === 第 8 步：构建 + 导入镜像 ===
 cd frontend-react && bun install && cd ..   # 生成 bun.lock（必须）
 sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
-sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
+sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile \
+  --build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080 \
+  .
 sudo docker pull postgres:18-alpine && sudo docker pull minio/minio:latest
 sudo docker pull minio/mc:latest && sudo docker pull busybox:1.36
 sudo docker pull rocker/rstudio:4.6.0
