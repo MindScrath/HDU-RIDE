@@ -8,3 +8,4 @@ backend/hdu-ride-backend
 storage/
 tmp/
 .trae/
+.playwright-mcp
