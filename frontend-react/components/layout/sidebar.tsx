@@ -4,7 +4,7 @@
 import { usePathname } from 'next/navigation'
 import { useSidebar } from './sidebar-context'
 import Link from 'next/link'
-import { Grid, Notebook, FileText, Settings, MessageCircle, Expand, PanelLeftClose } from 'lucide-react'
+import { Grid, Notebook, FileText, Settings, MessageCircle, Expand, PanelLeftClose, BookOpen } from 'lucide-react'
 import { useSession } from '@/stores/session'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +13,7 @@ const navItems = [
   { key: 'lectures', label: '讲义', path: '/lectures', icon: Notebook },
   { key: 'assignments', label: '作业', path: '/assignments', icon: FileText },
   { key: 'agui', label: 'AI 助手', path: '/agui', icon: MessageCircle },
+  { key: 'courses', label: '课程', path: '/admin/courses', icon: BookOpen, adminOnly: true },
   { key: 'admin', label: '管理', path: '/admin/users', icon: Settings, adminOnly: true },
 ]
 
