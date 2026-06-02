@@ -872,10 +872,10 @@ sudo ctr -n k8s.io images list | grep -E 'hdu-ride|postgres|minio|local-path-pro
 
 ### 11.5 可选：使用自定义 RStudio 镜像
 
-仓库里还有 `deploy/docker/rstudio.Dockerfile`，它会在 `rocker/rstudio:4.6.0` 基础上安装：
+仓库里还有 `deploy/docker/rstudio.Dockerfile`，它会在 `rocker/tidyverse:4.6.0` 基础上安装：
 
-- `tidyverse`
-- `rmarkdown`
+- `tidyverse`（已预装）
+- `rmarkdown`（已预装）
 - `renv`
 
 如果你希望学生开箱即用这些包，可以自己构建：
@@ -894,6 +894,34 @@ WORKSPACE_IMAGE_DEFAULT=hdu-ride-rstudio:latest
 ```
 
 如果你不确定，就先继续使用默认的 `rocker/rstudio:4.6.0`。
+
+#### 11.5.1 国内构建注意事项
+
+`rocker` 系列镜像默认使用 Posit Package Manager（`p3m.dev`）作为 R 包仓库。该服务在国内云主机上可能无法访问，导致 `install2.r` 安装包时失败。
+
+**典型错误：**
+
+```
+Warning: unable to access index for repository https://p3m.dev/cran/...
+Error: packages 'tidyverse', 'rmarkdown', 'renv' are not available
+```
+
+**已内置的解决方案（`deploy/docker/rstudio.Dockerfile` 已包含）：**
+
+1. **基准镜像改用 `rocker/tidyverse:4.6.0`**  
+   该镜像已预装 `tidyverse` + `rmarkdown`，无需从 p3m.dev 下载，只需额外安装轻量的 `renv`。
+
+2. **apt 源替换为阿里云镜像**  
+   适配 Ubuntu Noble (24.04) 的 deb822 格式，加速系统依赖安装。
+
+3. **CRAN 源替换为清华镜像**  
+   `install2.r -r https://mirrors.tuna.tsinghua.edu.cn/CRAN/` 绕过 p3m.dev。
+
+如果你仍然遇到 R 包安装问题：
+
+- 检查云主机是否能正常访问 `mirrors.tuna.tsinghua.edu.cn` 和 `mirrors.aliyun.com`
+- 可尝试其他国内 CRAN 镜像，例如 `https://mirrors.ustc.edu.cn/CRAN/`
+- 如果只想快速验证，也可以暂时跳过自定义镜像，直接用默认的 `rocker/rstudio:4.6.0`（学生需自行 `install.packages`）
 
 ---
 
