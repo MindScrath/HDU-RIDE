@@ -80,13 +80,6 @@ export default function AdminCoursesPage() {
 
   async function handleArchive(c: Course) {
     confirm({ title: "归档课程", message: `确定归档课程「${c.name}」？归档后仍可恢复。`, onConfirm: async () => { await api.patch(`/api/admin/courses/${c.id}`, { status: "archived" }); toast.success("课程已归档"); await load(); } })
-
-      await api.patch(`/api/admin/courses/${c.id}`, { status: 'archived' })
-      toast.success('课程已归档')
-      await load()
-    } catch (err: any) {
-      toast.error(err.message ?? '归档失败')
-    }
   }
 
   async function handleImport() {

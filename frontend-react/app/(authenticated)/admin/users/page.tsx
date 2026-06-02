@@ -25,7 +25,6 @@ import type { Role, User } from '@/lib/types'
 
 export default function AdminUsersPage() {
   const confirm = useConfirm()
-  const orig() {
   const currentUser = useSession((s) => s.user)
   const [users, setUsers] = useState<User[]>([])
   const [selectedUsers, setSelectedUsers] = useState<User[]>([])
@@ -111,7 +110,17 @@ export default function AdminUsersPage() {
     const rows = manageableSelection.filter((u) => action === 'activate' || canMutateIdentity(u))
     if (!rows.length) return
     if (action === 'disable') {
-      confirm({ title: "批量禁用", message: `确定禁用 ${rows.length} 个账号？`, onConfirm: async () => { await api.post("/api/admin/users/bulk", { action: "disable", ids: rows.map(u => u.id) }); toast.success("已禁用"); setSelectedIds(new Set()); await load(); } }) 
+      confirm({
+        title: "批量禁用",
+        message: `确定禁用 ${rows.length} 个账号？`,
+        onConfirm: async () => {
+          await api.post('/api/admin/users/bulk', { action, ids: rows.map(u => u.id) })
+          toast.success('已禁用')
+          setSelectedUsers([])
+          await load()
+        },
+      })
+      return
     }
     await api.post('/api/admin/users/bulk', { action, ids: rows.map((u) => u.id), role })
     toast.success('批量操作已完成')

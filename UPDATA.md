@@ -4,7 +4,7 @@
 
 ## 1. 先记住三件事
 
-1. 改了 `backend/` 或 `frontend/`，必须重新构建镜像，并重新让 Pod 启动。
+1. 改了 `backend/` 或 `frontend-react/`，必须重新构建镜像，并重新让 Pod 启动。
 2. Kubernetes 里真正需要重启的是 `Deployment` 对应的 Pod，不是 `Service`。
 3. 生产环境的课程内容来源是宿主机目录 `/opt/hdu-ride/content`，不是容器内手改的文件。
 

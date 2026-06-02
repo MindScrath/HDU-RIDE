@@ -251,8 +251,6 @@ func (c *CourseBundle) ByLecture(id string) (lectureFile, bool) {
 	return item, ok
 }
 
-func (c *CourseBundle) DefaultImage() string { return "" }
-
 func (c *CourseBundle) RenderLecture(id string) (string, error) {
 	item, ok := c.byLecture[id]
 	if !ok {

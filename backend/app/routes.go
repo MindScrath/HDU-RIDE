@@ -1673,22 +1673,6 @@ func nullCSVTime(value sql.NullTime) string {
 	return ""
 }
 
-func parseCSVLine(line string) []string {
-	parts := strings.Split(line, ",")
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
-	}
-	return parts
-}
-
-func atoiDefault(value string, fallback int) int {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fallback
-	}
-	return n
-}
-
 type studentImport struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"displayName"`

@@ -37,7 +37,7 @@
 - `backend/`
   - Go 后端
   - 提供登录、班级、作业、提交、评分、课程导入、RStudio 工作区管理
-- `frontend/`
+- `frontend-react/`
   - Vue 3 + Vite + Element Plus 前端
   - 对外提供网站页面
 - `content/`

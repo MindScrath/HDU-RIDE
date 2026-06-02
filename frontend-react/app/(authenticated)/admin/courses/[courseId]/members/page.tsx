@@ -51,13 +51,6 @@ export default function CourseMembersPage({ params }: { params: Promise<{ course
 
   async function handleRemove(userId: string, name: string) {
     confirm({ title: "移除成员", message: `确定移除「${name}」？`, onConfirm: async () => { await api.delete(`/api/admin/courses/${courseId}/members/${userId}`); toast.success("成员已移除"); await load(); } })
-
-      await api.delete(`/api/admin/courses/${courseId}/members/${userId}`)
-      toast.success('成员已移除')
-      await load()
-    } catch (err: any) {
-      toast.error(err.message ?? '移除失败')
-    }
   }
 
   return (

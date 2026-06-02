@@ -6,7 +6,6 @@ import type { User } from '@/lib/types'
 interface SessionState {
   user: User | null
   initialized: boolean
-  loading: boolean
   fetchSession: () => Promise<void>
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
@@ -18,15 +17,13 @@ interface SessionState {
 export const useSession = create<SessionState>((set, get) => ({
   user: null,
   initialized: false,
-  loading: false,
 
   fetchSession: async () => {
-    set({ loading: true })
     try {
       const data = await api.get<{ user: User }>('/api/session')
-      set({ user: data.user, initialized: true, loading: false })
+      set({ user: data.user, initialized: true })
     } catch {
-      set({ user: null, initialized: true, loading: false })
+      set({ user: null, initialized: true })
     }
   },
 

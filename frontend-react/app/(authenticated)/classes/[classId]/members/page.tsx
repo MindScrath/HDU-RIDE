@@ -63,13 +63,7 @@ export default function ClassMembersPage() {
   }
 
   async function handleRemoveTeacher(userId: string) {
-    confirm({ title: "移除教师", message: "确定移除该教师？", onConfirm: async () => { await api.delete(`/api/classes/${classId}/teachers/${userId}`); toast.success("教师已移除"); await load(); } }) 
-      await api.delete(`/api/classes/${classId}/teachers/${userId}`)
-      toast.success('教师已移除')
-      await load()
-    } catch (err: any) {
-      toast.error(err.message ?? '移除教师失败')
-    }
+    confirm({ title: "移除教师", message: "确定移除该教师？", onConfirm: async () => { await api.delete(`/api/classes/${classId}/teachers/${userId}`); toast.success("教师已移除"); await load(); } })
   }
 
   async function handleImport() {
@@ -86,8 +80,17 @@ export default function ClassMembersPage() {
 
   async function handleRemove(ids: string[]) {
     if (!ids.length) return
-    if (!ids.length) return
-    await api.post(`/api/classes/${classId}/members/bulk`, { action: 'remove', userIds: ids })
+    confirm({
+      title: "移除成员",
+      message: `确定移除 ${ids.length} 个班级成员？账号本身会保留。`,
+      onConfirm: async () => {
+        await api.post(`/api/classes/${classId}/members/bulk`, { action: 'remove', userIds: ids })
+        toast.success('成员已移除')
+        setSelectedIds(new Set())
+        await load()
+      },
+    })
+  }
     toast.success('成员已移除')
     setSelectedIds(new Set())
     await load()
