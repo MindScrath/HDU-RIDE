@@ -201,7 +201,7 @@ from classes c join class_members m on m.class_id=c.id where m.user_id=$1 order 
 func (a *App) createClass(c *gin.Context) {
 	user := currentUser(c)
 	if !canCreateClass(user) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅教师和管理员可创建班级"})
 		return
 	}
 	var req struct {
@@ -213,6 +213,15 @@ func (a *App) createClass(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid class request"})
 		return
+	}
+	// 非 root/admin 必须属于该课程的 teacher/admin
+	if user.Role != RoleRoot && user.Role != RoleAdmin {
+		ctx := c.Request.Context()
+		courseID, err := a.courseIDFromCode(ctx, req.CourseID)
+		if err != nil || !a.isCourseTeacher(ctx, user.ID, courseID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "仅课程教师可在该课程下创建班级"})
+			return
+		}
 	}
 	// 即使课程尚未导入，也允许创建班级（讲义/作业列表会显示为空）
 	classID := uuid.NewString()
@@ -368,12 +377,7 @@ on conflict (class_id, user_id) do update set member_role='student'
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "member bind failed"})
 			return
 		}
-		if role == RoleAssistant {
-			if err := a.refreshAssistantRole(c.Request.Context(), userID); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "assistant role refresh failed"})
-				return
-			}
-		}
+		// 助教角色仅通过 class_members.member_role 管理，不修改全局角色
 	}
 	logEvent(c.Request.Context(), a.db, user.ID, "class.members.import", classID)
 	c.JSON(http.StatusOK, gin.H{"imported": len(students)})
@@ -1538,9 +1542,7 @@ func (a *App) removeClassMember(ctx context.Context, classID, userID string) (bo
 	if err != nil {
 		return false, err
 	}
-	if err := a.refreshAssistantRole(ctx, userID); err != nil {
-		return false, err
-	}
+	// 助教角色仅通过 class_members 管理，不修改全局角色
 	return cmd.RowsAffected() > 0, nil
 }
 
@@ -1560,36 +1562,13 @@ where m.class_id=$1 and m.user_id=$2
 	if target.Role != RoleStudent && target.Role != RoleAssistant {
 		return false, nil
 	}
-	if memberRole == "assistant" {
-		if _, err := a.db.Exec(ctx, `
-update class_members set member_role='assistant' where class_id=$1 and user_id=$2;
-update users set role='assistant' where id=$2 and role='student';
-`, classID, userID); err != nil {
-			return false, err
-		}
-		return true, nil
+	// 助教仅是班级成员标签，不修改全局角色
+	if _, err := a.db.Exec(ctx, `update class_members set member_role=$1 where class_id=$2 and user_id=$3`, memberRole, classID, userID); err != nil {
+		return false, err
 	}
-	if memberRole == "student" {
-		if _, err := a.db.Exec(ctx, `update class_members set member_role='student' where class_id=$1 and user_id=$2`, classID, userID); err != nil {
-			return false, err
-		}
-		if err := a.refreshAssistantRole(ctx, userID); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	return false, nil
+	return true, nil
 }
 
-func (a *App) refreshAssistantRole(ctx context.Context, userID string) error {
-	_, err := a.db.Exec(ctx, `
-update users
-set role='student'
-where id=$1 and role='assistant'
-  and not exists(select 1 from class_members where user_id=$1 and member_role='assistant')
-`, userID)
-	return err
-}
 
 func (a *App) fetchUser(ctx context.Context, id string) (User, bool, error) {
 	var item User
