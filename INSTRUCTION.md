@@ -872,10 +872,10 @@ sudo ctr -n k8s.io images list | grep -E 'hdu-ride|postgres|minio|local-path-pro
 
 ### 11.5 可选：使用自定义 RStudio 镜像
 
-仓库里还有 `deploy/docker/rstudio.Dockerfile`，它会在 `rocker/tidyverse:4.6.0` 基础上安装：
+仓库里还有 `deploy/docker/rstudio.Dockerfile`，它会在 `rocker/rstudio:4.6.0` 基础上安装：
 
-- `tidyverse`（已预装）
-- `rmarkdown`（已预装）
+- `tidyverse`
+- `rmarkdown`
 - `renv`
 
 如果你希望学生开箱即用这些包，可以自己构建：
