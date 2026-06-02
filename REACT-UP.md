@@ -1,520 +1,363 @@
-# HDU RIDE React 前端 — 日常维护与升级指南
+# HDU RIDE（React 版）—— 日常更新维护手册
 
-本文档面向已经部署好的 HDU RIDE React 前端，讲解日常如何升级代码、更新依赖、新增页面、以及排查常见问题。
+本文档只讲一件事：已经部署运行后，改了代码或内容，怎样正确上线。
 
-文档分工：
+文档分工如下：
 
 - 首次部署看 [REACT-ON.md](REACT-ON.md)
-- 日常升级/维护看本文档
-- 后端/K8s/PostgreSQL/MinIO 运维看 [INSTRUCTION.md](INSTRUCTION.md)
+- 日常更新看本文档
+- 后端 / K8s / 数据库深度运维看 [INSTRUCTION.md](INSTRUCTION.md)
 
 ---
 
-## 1. 项目结构速查
+## 1. 先记住三件事
 
-```
-frontend-react/
-├── app/                           # Next.js App Router 页面
-│   ├── layout.tsx                 # 根布局（SessionProvider + Toaster）
-│   ├── globals.css                # 所有全局样式
-│   ├── login/page.tsx             # 登录页
-│   ├── (authenticated)/           # 认证路由组（有 Sidebar + Topbar）
-│   │   ├── layout.tsx             # 认证布局（SidebarProvider + Shell）
-│   │   ├── classes/page.tsx       # 班级列表
-│   │   ├── classes/[classId]/
-│   │   │   ├── members/page.tsx   # 班级成员
-│   │   │   ├── lectures/[[lectureId]]/page.tsx  # 班级讲义
-│   │   │   └── assignments/[[assignmentId]]/page.tsx  # 班级作业
-│   │   ├── lectures/[[lectureId]]/page.tsx  # 全局讲义
-│   │   ├── assignments/[[assignmentId]]/page.tsx  # 全局作业
-│   │   ├── admin/users/page.tsx   # 用户管理
-│   │   ├── admin/courses/page.tsx # 课程导入
-│   │   └── agui/page.tsx          # AI 助手（CopilotKit）
-│   └── api/copilotkit/route.ts    # CopilotKit 百炼 BFF 端点
-├── components/
-│   ├── ui/                        # Shadcn/ui 基础组件（自动生成）
-│   ├── layout/                    # 布局组件
-│   │   ├── sidebar.tsx            # 侧边栏导航
-│   │   ├── sidebar-context.tsx    # 侧边栏折叠状态 Context
-│   │   ├── topbar.tsx             # 顶栏（用户菜单 + 修改密码）
-│   │   └── authenticated-shell.tsx # 认证外壳（Topbar + Sidebar + main）
-│   ├── markdown/                  # MarkdownRenderer（react-markdown + KaTeX）
-│   ├── lectures/                  # 讲义查看器（章节树 + 内容渲染）
-│   └── assignments/              # 作业查看器（三面板 + RStudio iframe + 批改）
-├── lib/
-│   ├── api.ts                     # Go 后端 API 请求封装
-│   ├── types.ts                   # TypeScript 类型定义
-│   └── utils.ts                   # cn() + generateId()
-├── stores/
-│   └── session.ts                 # Zustand 认证状态
-├── providers/
-│   └── session-provider.tsx       # 会话初始化 Provider
-├── middleware.ts                  # 路由鉴权（Cookie 校验）
-├── next.config.ts                 # Next.js 配置（含 API 代理 rewrites）
-├── package.json                   # 依赖声明
-└── .env.local                     # 本地环境变量（百炼密钥等）
-```
+1. 改了 `backend/` 或 `frontend-react/`，必须**重新构建镜像 → 导入 containerd → 重启 Deployment**。三步缺一不可。
+2. Kubernetes 里真正需要重启的是 `Deployment` 对应的 Pod，不是 `Service`。
+3. 生产环境课程内容来源是宿主机目录 `/opt/hdu-ride/content`，不是容器内手改的文件。
 
 ---
 
-## 2. 日常开发流程
+## 2. 为什么改了镜像 Pod 还是没变
 
-### 2.1 启动开发服务器
+当前仓库里：
 
-```bash
-cd /opt/hdu-ride/frontend-react
-bun run dev
-```
+- 后端镜像是 `hdu-ride-backend:latest`
+- 前端镜像是 `hdu-ride-frontend:latest`
+- `deploy/k8s/backend.yml` 和 `deploy/k8s/frontend.yml` 都是 `imagePullPolicy: IfNotPresent`
 
-浏览器访问 `http://localhost:3000`。
+这意味着：
 
-> 如果后端在 K8s 集群内，需要先 `kubectl port-forward -n hdu-ride svc/hdu-ride-backend 8080:8080`。
+- 你就算重新 `docker build` 了同名 `latest` 镜像，正在运行的旧 Pod 也不会自动变成新代码
+- `kubectl apply -f ...` 只是在集群里更新清单，不等于强制重建现有 Pod
+- `Service` 只是转发流量，不负责重建 Pod，所以重启 `Service` 没用
 
-### 2.2 修改后热更新
+因此，代码上线时一定要做两件事：
 
-Next.js 开发服务器支持 **热模块替换（HMR）**：
-
-- 修改 `.tsx` / `.ts` 文件 → 浏览器自动刷新
-- 修改 `globals.css` → 样式即时生效
-- 修改 `next.config.ts` → 需要手动重启 `bun run dev`
-
-### 2.3 TypeScript 类型检查
-
-提交前务必检查类型：
-
-```bash
-bun x --bun tsc --noEmit
-```
-
-零错误才能提交。
+1. 让新镜像进入 Kubernetes 实际使用的 `containerd`
+2. 让 `Deployment` 重新 rollout，生成新 Pod
 
 ---
 
-## 3. 添加新页面
+## 3. 前后端都改了（标准全量更新）
 
-### 3.1 在 `app/(authenticated)/` 下创建路由
+适用场景：
 
-Next.js App Router 是**文件系统路由**。例如要添加一个 `/settings` 页面：
+- 修改了 Go 后端代码
+- 修改了 React 前端代码
+- 修改了 `deploy/docker/backend.Dockerfile`
+- 修改了 `deploy/docker/frontend.Dockerfile`
+- 修改了 `frontend-react/next.config.ts`
 
-```bash
-mkdir -p app/\(authenticated\)/settings
-```
-
-创建 `app/(authenticated)/settings/page.tsx`：
-
-```tsx
-// app/(authenticated)/settings/page.tsx
-export default function SettingsPage() {
-  return (
-    <section className="panel single-panel">
-      <div className="panel-head">
-        <h2>设置</h2>
-      </div>
-      <div className="p-6">
-        {/* 页面内容 */}
-      </div>
-    </section>
-  )
-}
-```
-
-文件创建后路由自动生效 — 不需要手动注册路由。
-
-### 3.2 在侧边栏添加导航项
-
-编辑 `components/layout/sidebar.tsx`，在 `navItems` 数组中加一项：
-
-```tsx
-const navItems = [
-  // ... 现有项
-  { key: 'settings', label: '设置', path: '/settings', icon: Settings },
-]
-```
-
-从 `lucide-react` 选择合适的图标：
-
-```tsx
-import { ..., Settings } from 'lucide-react'
-```
-
-### 3.3 页面样式约定
-
-| 场景 | CSS 类名 | 说明 |
-|------|---------|------|
-| 单面板页面 | `panel single-panel` | 最大宽度 1180px，居中 |
-| 双面板页面 | `page-grid` | 左侧 260px + 右侧自适应 |
-| 三面板页面 | `assignment-grid` | 作业页专用，可拖拽调整宽度 |
-| 面板头部 | `panel-head` | 标题 + 操作按钮区 |
-| 操作按钮区 | `toolbar-actions` | 右对齐的按钮组 |
-| 灰色辅助文字 | `muted` | 面板标题下方的说明文字 |
-
-这些类全部定义在 `app/globals.css`，可直接使用。
-
----
-
-## 4. 修改现有页面
-
-### 4.1 修改 API 调用
-
-所有后端 API 调用统一通过 `lib/api.ts`：
-
-```tsx
-import { api } from '@/lib/api'
-
-// GET
-const data = await api.get<{ classes: ClassItem[] }>('/api/classes')
-
-// POST
-await api.post('/api/classes', { name: '新班级', courseId: 'intro-r' })
-
-// PATCH
-await api.patch('/api/admin/users/123', { displayName: '新名字' })
-
-// DELETE
-await api.delete('/api/admin/users/123')
-
-// 文件下载
-const blob = await api.download('/api/path/to/file')
-```
-
-### 4.2 添加/修改 TypeScript 类型
-
-在 `lib/types.ts` 中添加新接口。**注意**：类型名和字段名必须与 Go 后端返回的 JSON 字段一致（小驼峰）。
-
-```typescript
-// 示例：添加新类型
-export interface NewFeature {
-  id: string
-  name: string
-  createdAt: string
-}
-```
-
-### 4.3 使用 Zustand Store 管理状态
-
-当前只有一个 Store：`stores/session.ts`。如需添加全局状态：
-
-```typescript
-// stores/new-feature.ts
-import { create } from 'zustand'
-
-interface NewFeatureState {
-  data: SomeType[]
-  loading: boolean
-  fetchData: () => Promise<void>
-}
-
-export const useNewFeature = create<NewFeatureState>((set) => ({
-  data: [],
-  loading: false,
-  fetchData: async () => {
-    set({ loading: true })
-    const result = await api.get<{ items: SomeType[] }>('/api/path')
-    set({ data: result.items, loading: false })
-  },
-}))
-```
-
-页面中使用（注意用 selector 避免不必要渲染）：
-
-```tsx
-const data = useNewFeature((s) => s.data)
-const fetchData = useNewFeature((s) => s.fetchData)
-```
-
----
-
-## 5. 更新依赖
-
-### 5.1 检查过期依赖
+服务器上统一在 `/opt/hdu-ride` 操作。
 
 ```bash
-cd frontend-react
-bun outdated
-```
+# 1. 拉取最新代码
+cd /opt/hdu-ride
+git pull
 
-### 5.2 更新所有依赖
+# 2. 生成 bun.lock（如果前端依赖有变化）
+cd frontend-react && bun install && cd ..
 
-```bash
-bun update
-```
+# 3. 重新构建两个镜像
+sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
 
-### 5.3 更新特定依赖
+sudo docker build -t hdu-ride-frontend:latest \
+  -f deploy/docker/frontend.Dockerfile \
+  --build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080 \
+  .
 
-```bash
-bun update @copilotkit/react-core @copilotkit/react-ui @copilotkit/runtime
-```
+# 4. 导入 containerd
+cd /tmp
+sudo docker save hdu-ride-backend:latest -o hdu-ride-backend.tar
+sudo docker save hdu-ride-frontend:latest -o hdu-ride-frontend.tar
+sudo ctr -n k8s.io images import hdu-ride-backend.tar
+sudo ctr -n k8s.io images import hdu-ride-frontend.tar
 
-### 5.4 更新后的验证步骤
+# 5. 重新应用 K8s 资源
+cd /opt/hdu-ride
+bash scripts/k8s-prod-up.sh
 
-```bash
-# 1. 类型检查
-bun x --bun tsc --noEmit
-
-# 2. 构建检查
-bun run build
-
-# 3. 启动验证
-bun run dev
-# 手动检查登录、讲义（Markdown 渲染）、AI 助手等功能
-```
-
----
-
-## 6. CopilotKit / 百炼 AI 维护
-
-### 6.1 切换百炼模型
-
-编辑 `app/api/copilotkit/route.ts`：
-
-```typescript
-const openai = new OpenAI({
-  apiKey: process.env.BAILIAN_API_KEY!,
-  baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  defaultHeaders: {
-    'X-DashScope-AppId': process.env.BAILIAN_APP_ID!,
-  },
-})
-
-const serviceAdapter = new OpenAIAdapter({
-  openai,
-  model: 'qwen-plus',    // 可改为 qwen-turbo, qwen-max, qwen-plus-latest 等
-})
-```
-
-百炼支持的模型：`qwen-turbo`（快/便宜）、`qwen-plus`（均衡）、`qwen-max`（最强）。
-
-### 6.2 调试 AI 响应
-
-开启 CopilotKit 调试模式（开发环境）：
-
-在 `app/(authenticated)/agui/page.tsx` 中临时添加：
-
-```tsx
-<CopilotKit runtimeUrl="/api/copilotkit" publicApiKey="ck_pub_...">
-```
-
-或查看 Next.js 服务端日志：
-
-```bash
-# 查看 /api/copilotkit 的请求日志
-curl -X POST http://localhost:3000/api/copilotkit \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"你好"}]}'
-```
-
-### 6.3 百炼 API Key 轮换
-
-1. 在阿里云百炼控制台生成新 Key
-2. 更新 `frontend-react/.env.local`（开发）或 K8s Secret（生产）
-3. 重启前端服务
-
-```bash
-# 开发环境
-bun run dev
-
-# 生产环境（Docker）
-docker restart hdu-ride-frontend
-
-# 生产环境（K8s）
+# 6. 重启 Deployment（关键步骤！）
+kubectl rollout restart deployment/hdu-ride-backend -n hdu-ride
 kubectl rollout restart deployment/hdu-ride-frontend -n hdu-ride
+
+# 7. 等待新 Pod 就绪
+kubectl rollout status deployment/hdu-ride-backend -n hdu-ride --timeout=180s
+kubectl rollout status deployment/hdu-ride-frontend -n hdu-ride --timeout=180s
+
+# 8. 最终检查
+kubectl get pods -n hdu-ride
 ```
 
 ---
 
-## 7. 样式修改
+## 4. 只改了后端
 
-### 7.1 Shadcn/ui 主题
+适用场景：
 
-在 `app/globals.css` 中通过 CSS 变量调整主题色：
-
-```css
-@layer base {
-  :root {
-    --primary: 222.2 47.4% 11.2%;
-    /* Shadcn/ui 主题变量 */
-  }
-}
-```
-
-### 7.2 修改全局样式
-
-业务相关样式全部在 `app/globals.css` 中，使用传统 CSS（非 Tailwind 原子类）。原因是这些样式从 Vue 版精确迁移而来，保持一致性。
-
-- `.panel` — 白色卡片容器
-- `.panel-head` — 面板标题栏
-- `.markdown` — Markdown 内容排版
-- `.assignment-grid` — 三面板作业布局
-- 等等
-
-修改这些样式后，开发服务器会**即时热更新**。
-
-### 7.3 添加 Shadcn/ui 组件
+- 修改了 `backend/app/*.go`
+- 修改了 `deploy/docker/backend.Dockerfile`
 
 ```bash
-npx shadcn@latest add <component-name>
-```
+cd /opt/hdu-ride
+git pull
 
-常用组件：`accordion`, `alert-dialog`, `card`, `popover`, `tabs`, `tooltip`。
+sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
+
+cd /tmp
+sudo docker save hdu-ride-backend:latest -o hdu-ride-backend.tar
+sudo ctr -n k8s.io images import hdu-ride-backend.tar
+
+cd /opt/hdu-ride
+bash scripts/k8s-prod-up.sh
+
+kubectl rollout restart deployment/hdu-ride-backend -n hdu-ride
+kubectl rollout status deployment/hdu-ride-backend -n hdu-ride --timeout=180s
+```
 
 ---
 
-## 8. 生产部署升级流程
+## 5. 只改了前端
 
-### 8.1 代码更新
+适用场景：
+
+- 修改了 `frontend-react/app/*.tsx`
+- 修改了 `frontend-react/components/*.tsx`
+- 修改了 `frontend-react/lib/*.ts`
+- 修改了 `frontend-react/package.json`
+- 修改了 `deploy/docker/frontend.Dockerfile`
+
+```bash
+cd /opt/hdu-ride
+git pull
+
+# 如果改了 package.json 或新增了依赖，重新生成 bun.lock
+cd frontend-react && bun install && cd ..
+
+sudo docker build -t hdu-ride-frontend:latest \
+  -f deploy/docker/frontend.Dockerfile \
+  --build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080 \
+  .
+
+cd /tmp
+sudo docker save hdu-ride-frontend:latest -o hdu-ride-frontend.tar
+sudo ctr -n k8s.io images import hdu-ride-frontend.tar
+
+cd /opt/hdu-ride
+bash scripts/k8s-prod-up.sh
+
+kubectl rollout restart deployment/hdu-ride-frontend -n hdu-ride
+kubectl rollout status deployment/hdu-ride-frontend -n hdu-ride --timeout=180s
+```
+
+> `--build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080` 是**生产环境必须的**。它告诉 Next.js 在 K8s 集群内部用 Service 名 `hdu-ride-backend` 来代理 `/api` 和 `/ide` 请求。如果不传，默认值是 `http://localhost:8080`，在 K8s 环境下会导致所有 API 请求失败。
+
+---
+
+## 6. 验证新 Pod 是否真的换新了
+
+```bash
+kubectl get pods -n hdu-ride -o wide
+```
+
+重点检查：
+
+- 新 Pod 的 `AGE` 是不是刚刚（几秒或几分钟）
+- 老 Pod 是否已经终止（`Terminating` 或已消失）
+- `READY` 列是否都是 `1/1`
+
+再看 Deployment 状态：
+
+```bash
+kubectl get deploy -n hdu-ride
+kubectl describe deploy hdu-ride-backend -n hdu-ride | tail -20
+kubectl describe deploy hdu-ride-frontend -n hdu-ride | tail -20
+```
+
+如果上线后有异常，看日志：
+
+```bash
+kubectl logs -l app.kubernetes.io/name=hdu-ride-backend -n hdu-ride --tail=200
+kubectl logs -l app.kubernetes.io/name=hdu-ride-frontend -n hdu-ride --tail=200
+```
+
+---
+
+## 7. 只改了课程内容
+
+课程内容更新**不需要重建镜像**。后端在启动时把课程内容加载到内存，修改磁盘上的文件后必须触发重载。
+
+### 7.1 数据流
+
+```
+宿主机 /opt/hdu-ride/content/
+    │
+    │  hostPath PV
+    ▼
+Kubernetes PVC hdu-ride-content
+    │
+    │  volumeMount /content
+    ▼
+后端容器 /content/
+    │
+    │  app.LoadCourses() 启动时加载到内存
+    ▼
+后端内存 (content.CourseStore) ◄── 前端 API 从这里读取
+```
+
+### 7.2 快速更新（推荐：用脚本）
+
+```bash
+cd /opt/hdu-ride
+bash scripts/update-content.sh
+```
+
+这个脚本会：
+1. 执行 `git pull` 拉取最新 content
+2. 显示 content/ 的变更摘要
+3. 自动触发课程重载（优先尝试 API，失败时回退到重启 backend）
+
+如果不想 git pull（已经手动更新了文件）：
+
+```bash
+bash scripts/update-content.sh --no-pull
+```
+
+如果 API 重载不可用，直接用重启方式：
+
+```bash
+bash scripts/update-content.sh --restart
+```
+
+### 7.3 手动更新（分步操作）
+
+**第一步：更新文件**
 
 ```bash
 cd /opt/hdu-ride
 git pull
 ```
 
-### 8.2 Docker 升级（推荐）
+确认文件已更新：
 
 ```bash
-cd /opt/hdu-ride
-
-# 重新构建镜像
-docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile .
-
-# 重启容器
-docker stop hdu-ride-frontend
-docker rm hdu-ride-frontend
-docker run -d \
-  --name hdu-ride-frontend \
-  --network host \
-  -e BAILIAN_API_KEY=sk-xxx \
-  -e BAILIAN_APP_ID=xxx \
-  -e NEXT_PUBLIC_GO_API_URL=http://localhost:8080 \
-  hdu-ride-frontend:latest
+ls /opt/hdu-ride/content/courses/
+cat /opt/hdu-ride/content/courses/intro-r/course.yml | head -10
 ```
 
-### 8.3 Kubernetes 升级
+**第二步：触发重载（二选一）**
+
+方式 A — 通过管理后台（推荐，无中断）：
+1. 用管理员账号登录
+2. 进入课程管理页
+3. 点击"重新加载"
+
+方式 B — 重启 backend（有几秒中断）：
 
 ```bash
-# 构建 + 推送镜像（根据实际镜像仓库调整）
-docker build -t your-registry/hdu-ride-frontend:v1.1 -f deploy/docker/frontend.Dockerfile .
-docker push your-registry/hdu-ride-frontend:v1.1
-
-# 更新 Deployment 镜像
-kubectl set image deployment/hdu-ride-frontend \
-  frontend=your-registry/hdu-ride-frontend:v1.1 \
-  -n hdu-ride
-
-# 等待滚动更新完成
-kubectl rollout status deployment/hdu-ride-frontend -n hdu-ride
+kubectl rollout restart deployment/hdu-ride-backend -n hdu-ride
+kubectl rollout status deployment/hdu-ride-backend -n hdu-ride --timeout=180s
 ```
 
-### 8.4 零停机部署
+**第三步：验证**
 
-Next.js standalone 模式支持优雅关闭。K8s 默认滚动更新策略（`maxUnavailable: 25%`）确保升级过程中始终有 Pod 在服务。
+刷新浏览器页面，检查：
+- 讲义列表中是否出现新增的章节
+- 作业列表中是否出现新增的作业
+- 点击章节和作业，内容是否正确渲染
 
----
+### 7.4 课程加载的容错行为
 
-## 9. 常见问题排查
+- 如果某个课程的 `course.yml` 有 YAML 语法错误，**整个课程**会加载失败（后端启动时打印 WARNING 日志，但继续运行其他课程）
+- 如果某个作业目录缺失或 `assignment.yml` 有误，**该作业被跳过**，其他作业和章节正常加载
 
-### 9.1 页面空白 / 白屏
+### 7.5 更新后全部讲义消失
 
-**可能原因**：JavaScript 报错导致 React 未挂载。
+最可能的原因：
 
-**排查**：
+1. **course.yml 有 YAML 语法错误** — 检查缩进（必须用空格，不能用 Tab）
+2. **重载成功但报了 warning** — 打开浏览器 F12 Network 面板，查看 reload API 返回值
 
-```bash
-# 开发模式看终端输出
-bun run dev
-
-# 生产模式看容器日志
-docker logs hdu-ride-frontend
-
-# 浏览器 F12 → Console 查看 JS 报错
-```
-
-常见根因：
-- `.env.local` 中百炼 API Key 缺失导致构建期报错
-- 后端 API 不可达导致 `fetchSession` 无限重试
-
-### 9.2 登录后仍然跳回登录页
-
-**原因**：Cookie 未正确设置（Go 后端设置 `session_token` cookie，前端 middleware 检查该 cookie）。
-
-**排查**：
-- Go 后端是否在运行且 `/api/login` 返回了 `Set-Cookie` 头
-- 前端 `lib/api.ts` 中 `credentials: 'include'` 是否生效
-- 浏览器 DevTools → Application → Cookies 检查 `session_token` 是否存在
-
-### 9.3 Markdown / LaTeX 公式不渲染
-
-**原因**：KaTeX CSS 未加载或 remark/rehype 插件未生效。
-
-**排查**：
-
-1. 确认 `app/globals.css` 中有 `@import 'katex/dist/katex.min.css';`
-2. 确认 `components/markdown/MarkdownRenderer.tsx` 中插件配置正确
-3. 确认内容中的公式格式正确：
-   - 行内公式：`$E = mc^2$`
-   - 块级公式：`$$\hat{\beta} = (X^TX)^{-1}X^Ty$$`
-   - 对齐环境：需要用 `\begin{aligned}` 包裹
-
-### 9.4 AI 助手无响应
-
-**原因**：百炼 API 连接失败。
-
-**排查步骤**：
-
-1. 检查 `.env.local` 中的密钥是否正确
-2. 直接测试百炼 API：
+排查：
 
 ```bash
-curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions \
-  -H "Authorization: Bearer $BAILIAN_API_KEY" \
-  -H "X-DashScope-AppId: $BAILIAN_APP_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"qwen-plus","messages":[{"role":"user","content":"你好"}]}'
-```
-
-3. 检查 CopilotKit 服务端日志（`bun run dev` 终端输出）
-
-### 9.5 RStudio iframe 无法加载
-
-**原因**：Go 后端的工作区代理未正确转发。
-
-**排查**：
-- Next.js rewrites 将 `/ide/*` 代理到 Go 后端（`next.config.ts`）
-- Go 后端在 K8s 中创建 Pod/PVC/Service 后，工作区需要 10-30 秒就绪
-- 前端 `waitForGateway()` 会重试 30 次（每次 700ms），超时后提示 "RStudio 尚未就绪"
-
-### 9.6 修改代码后页面不更新
-
-**开发模式**：确认 `bun run dev` 正在运行，HMR 应自动生效。
-
-**生产模式**：必须重新构建 + 重启服务：
-
-```bash
-bun run build && bun run start
+kubectl logs -l app.kubernetes.io/name=hdu-ride-backend -n hdu-ride --tail=50 | grep -i "warn\|error\|fail"
 ```
 
 ---
 
-## 10. 安全注意事项
+## 8. 出问题时怎么强制换 Pod
 
-1. **`.env.local` 绝不提交到 Git**（已在 `.gitignore` 中）
-2. **百炼 API Key** 在前端代码中不可见，只在 Next.js 服务端 `app/api/copilotkit/route.ts` 中使用
-3. **Go 后端 API** 通过 Next.js rewrites 代理，不直接暴露给浏览器
-4. **生产环境**建议使用 K8s Secrets 管理敏感配置，而非 `.env.local` 文件
-5. **定期轮换**百炼 API Key
+如果你已经确认新镜像导入成功，但 Pod 还是异常，按下面顺序处理。
+
+### 8.1 先正常 rollout restart
+
+```bash
+kubectl rollout restart deployment/hdu-ride-backend -n hdu-ride
+kubectl rollout restart deployment/hdu-ride-frontend -n hdu-ride
+kubectl rollout status deployment/hdu-ride-backend -n hdu-ride --timeout=180s
+kubectl rollout status deployment/hdu-ride-frontend -n hdu-ride --timeout=180s
+```
+
+### 8.2 如果 rollout 卡住，先看事件
+
+```bash
+kubectl get pods -n hdu-ride
+kubectl get events -n hdu-ride --sort-by=.lastTimestamp | tail -30
+```
+
+### 8.3 必要时删除旧 Pod，让 Deployment 立即补新 Pod
+
+```bash
+kubectl delete pod -l app.kubernetes.io/name=hdu-ride-backend -n hdu-ride
+kubectl delete pod -l app.kubernetes.io/name=hdu-ride-frontend -n hdu-ride
+```
+
+删除后 Deployment 会自动创建新 Pod。
+
+注意：
+
+- 删除的是 Pod，不是 Deployment
+- 不要删 `Service`
+- 不要删 `pv/pvc`，除非你明确在修存储问题
 
 ---
 
-## 11. 快速参考
+## 9. 上线后检查清单
 
-| 操作 | 命令 |
-|------|------|
-| 启动开发 | `cd frontend-react && bun run dev` |
-| 类型检查 | `bun x --bun tsc --noEmit` |
-| 生产构建 | `bun run build` |
-| 生产启动 | `bun run start` |
-| 安装新依赖 | `bun add <package>` |
-| 更新依赖 | `bun update` |
-| 添加 shadcn 组件 | `npx shadcn@latest add <name>` |
-| Docker 构建 | `docker build -t hdu-ride-frontend -f deploy/docker/frontend.Dockerfile .` |
-| 查看运行日志 | `docker logs hdu-ride-frontend` |
-| K8s 重启 | `kubectl rollout restart deployment/hdu-ride-frontend -n hdu-ride` |
+代码上线后至少检查：
+
+```bash
+kubectl get pods -n hdu-ride
+kubectl get svc -n hdu-ride
+```
+
+并确认：
+
+- `postgres-0` 是 `Running`
+- `minio-0` 是 `Running`
+- `hdu-ride-backend` 的 Pod 是**新创建的**并处于 `Running`
+- `hdu-ride-frontend` 的 Pod 是**新创建的**并处于 `Running`
+- 网页访问正常
+- 管理员登录正常
+
+如果更新了内容，还要额外确认：
+
+- 目标课程页面已经显示新内容
+- 作业说明、讲义等变化已经可见
+
+---
+
+## 10. 总结
+
+上线时最容易漏掉的点只有两个：
+
+1. 改了前后端代码后，没有把镜像导入 `containerd`
+2. 导入新镜像后，没有执行 `kubectl rollout restart deployment/...`
+
+而 `content` 的原则也只有三句话：
+
+- **生产以 `/opt/hdu-ride/content` 为准**，不要去容器里手改文件
+- **改完必须重载**，否则后端内存里还是旧数据 — 执行 `bash scripts/update-content.sh`，或通过管理后台点击"重新加载"
+- **重载报错时看 warning**，它会告诉你哪个作业或文件出了问题

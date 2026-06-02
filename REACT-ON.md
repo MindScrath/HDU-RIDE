@@ -19,10 +19,10 @@
 
 | 组件 | 技术栈 | 说明 |
 |------|--------|------|
-| 前端 | Next.js + React 19 + Shadcn/ui + Tailwind CSS | 对外提供网站页面 |
-| AI 助手 | CopilotKit AG-UI + 阿里云百炼（通义千问） | 在线 AI 聊天，支持流式响应 |
-| 后端 | Go | 登录、班级、作业、提交、评分、工作区管理 |
-| 数据库 | PostgreSQL | 业务主数据 |
+| 前端 | Next.js 16 + React 19 + Tailwind CSS + shadcn/ui | 对外提供网站页面 |
+| AI 助手 | CopilotKit + 阿里云百炼（通义千问） | 在线 AI 聊天，支持流式响应 |
+| 后端 | Go 1.26 + Gin | 登录、班级、作业、提交、评分、工作区管理 |
+| 数据库 | PostgreSQL 18 | 业务主数据 |
 | 对象存储 | MinIO | 提交文件与工作区归档 |
 | 工作区 | Kubernetes Pod + PVC + Service | 每个学生/作业独立 RStudio 在线环境 |
 | 反向代理 | 宿主机 Nginx | 公网入口，域名 + HTTPS |
@@ -32,12 +32,19 @@
 ```
 /opt/hdu-ride/
 ├── backend/              # Go 后端
-├── frontend-react/       # React 前端 (Next.js)
+│   └── app/              # 业务代码
+├── frontend-react/       # React 前端 (Next.js 16)
+│   ├── app/              # 页面路由
+│   ├── components/       # UI 组件
+│   ├── lib/              # API 客户端、类型
+│   └── stores/           # 状态管理
 ├── content/              # 课程内容（讲义、作业说明、starter、测试数据）
 ├── deploy/
-│   ├── docker/           # Dockerfile（后端、前端、RStudio 自定义镜像、Nginx 配置）
+│   ├── docker/           # Dockerfile（后端、前端、RStudio 自定义镜像）
 │   └── k8s/              # Kubernetes 清单
-└── scripts/              # 部署/运维脚本入口
+├── scripts/              # 部署/运维脚本入口
+├── .env                  # 环境变量（从 .env.example 复制并修改）
+└── .env.example          # 环境变量模板
 ```
 
 ### 1.2 运行时链路
@@ -45,7 +52,7 @@
 ```
 公网 → 宿主机 Nginx (80/443)
         → 前端 NodePort (127.0.0.1:30080)
-          → 前端容器 (Next.js, 端口 3000)
+          → 前端容器 (Next.js standalone, 端口 3000)
             → /api/* 和 /ide/* → Go 后端 (hdu-ride-backend:8080)
               → PostgreSQL / MinIO / 课程内容 / K8s 工作区
 ```
@@ -92,7 +99,7 @@
 ```bash
 sudo apt update
 
-# 国内环境建议先换阿里云镜像源
+# 国内环境建议先换阿里云镜像源（已换过的可以跳过）
 sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
 sudo sed -i 's|http://archive.ubuntu.com/ubuntu/|https://mirrors.aliyun.com/ubuntu/|g; s|http://security.ubuntu.com/ubuntu/|https://mirrors.aliyun.com/ubuntu/|g' /etc/apt/sources.list
 sudo apt update
@@ -121,6 +128,7 @@ sudo tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
 echo 'export PATH=/usr/local/go/bin:$PATH' | sudo tee /etc/profile.d/go.sh
 source /etc/profile.d/go.sh
 go version
+# 应输出: go version go1.26.0 linux/amd64
 
 # 配置国内代理
 go env -w GOPROXY=https://goproxy.cn,direct
@@ -129,21 +137,20 @@ go env -w GOSUMDB=sum.golang.google.cn
 
 ---
 
-## 5. 安装 Bun（React 前端运行时 + 包管理器）
+## 5. 安装 Bun（React 前端构建需要）
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
 source ~/.bashrc
 bun --version
+# 应输出: 1.3.x
 ```
 
-> **Docker 构建前提**：项目使用 npm 创建（有 `package-lock.json`），但 Dockerfile 基于 Bun。构建镜像前必须先运行：
->
+> **重要**：后续 Docker 构建前端镜像时需要 `bun.lock` 文件。项目使用 npm 创建（自带 `package-lock.json`），部署前必须先运行：
 > ```bash
 > cd /opt/hdu-ride/frontend-react && bun install
 > ```
->
-> 这会生成 `bun.lock`，Docker 构建时才能正确 `COPY` 并安装依赖。
+> 这会根据 `package.json` 生成 `bun.lock`。后面构建步骤会再次提醒。
 
 ---
 
@@ -196,6 +203,13 @@ sudo kubeadm init \
   --image-repository registry.aliyuncs.com/google_containers
 ```
 
+输出最后几行会显示类似内容：
+```
+Your Kubernetes control-plane has initialized successfully!
+...
+kubeadm join <IP>:6443 --token <token> ...
+```
+
 ### 6.5 配置 kubectl
 
 ```bash
@@ -203,9 +217,9 @@ mkdir -p $HOME/.kube
 sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
 kubectl get nodes
+# 应输出: NAME   STATUS   ROLES   AGE   VERSION
+# 节点显示 NotReady 是正常的——还没安装网络插件
 ```
-
-> 此时节点显示 `NotReady` 是正常的——还没安装网络插件。
 
 ### 6.6 允许调度到控制平面（单节点必须）
 
@@ -214,7 +228,7 @@ kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
 kubectl taint nodes --all node-role.kubernetes.io/master- || true
 ```
 
-> `|| true` 是为了忽略 "not found" 错误——新版本 K8s 用 `control-plane`，旧版本用 `master`，你的集群可能只有其中一个 taint。报 `taint not found` 是正常的，说明没有需要移除的 taint。
+> `|| true` 是为了忽略 "not found" 错误。新版本 K8s 用 `control-plane`，旧版本用 `master`，你的集群可能只有其中一个 taint。报 `taint not found` 是正常的，说明没有需要移除的 taint。
 
 ### 6.7 安装 Flannel 网络
 
@@ -227,8 +241,13 @@ bash scripts/k8s-install-flannel.sh
 
 ```bash
 kubectl get pods -n kube-flannel
+# 应全部显示 Running
+
 kubectl get pods -n kube-system
-kubectl get nodes   # 应显示 Ready
+# coredns 应从 Pending 变为 Running
+
+kubectl get nodes
+# 应显示 Ready
 ```
 
 ---
@@ -273,8 +292,6 @@ cp .env.example .env
 nano .env
 ```
 
-> **注意**：`.env.example` 可能尚未包含 AI 助手和镜像名变量（`BAILIAN_API_KEY`、`BAILIAN_APP_ID`、`BACKEND_IMAGE`、`FRONTEND_IMAGE`）。如果复制后缺少这些字段，请参照下方 9.2 节的完整模板手动添加到 `.env` 末尾。
-
 ### 9.2 必须修改的字段
 
 ```dotenv
@@ -299,7 +316,7 @@ ROOT_PASSWORD=请先自定义管理员密码
 WORKSPACE_STORAGE_CLASS=local-path
 WORKSPACE_IMAGE_DEFAULT=rocker/rstudio:4.6.0
 
-# ── AI 助手（React 版新增）──
+# ── AI 助手 ──
 BAILIAN_API_KEY=sk-xxxxxxxxxxxxxxxx     # 阿里云百炼 API Key
 BAILIAN_APP_ID=xxxxxxxxxxxxxxxx         # 阿里云百炼 App ID
 
@@ -308,6 +325,8 @@ BACKEND_IMAGE=hdu-ride-backend:latest
 FRONTEND_IMAGE=hdu-ride-frontend:latest
 ```
 
+> 如果从 `.env.example` 复制后发现缺少 `BAILIAN_API_KEY`、`BAILIAN_APP_ID`、`BACKEND_IMAGE`、`FRONTEND_IMAGE` 这四个变量，请参照上方模板手动添加到 `.env` 末尾。
+
 ### 9.3 生成 ROOT_PASSWORD_HASH
 
 ```bash
@@ -315,7 +334,7 @@ cd /opt/hdu-ride/backend
 go run . hash-password '你的管理员密码'
 ```
 
-把输出填入 `.env` 的 `ROOT_PASSWORD_HASH`。
+输出类似 `$2a$10$...`，把这一整行填入 `.env` 的 `ROOT_PASSWORD_HASH=` 后面。
 
 ### 9.4 准备内容目录
 
@@ -329,9 +348,9 @@ mkdir -p /opt/hdu-ride/content
 /opt/hdu-ride/content/
   courses/
     intro-r/
-      course.yml
-      chapters/
-      assignments/
+      course.yml          # 课程元数据
+      chapters/           # 章节 Markdown 文件
+      assignments/        # 作业 yaml + README
         hw01/
           assignment.yml
           README.md
@@ -339,6 +358,8 @@ mkdir -p /opt/hdu-ride/content
           data/public/
           tests/public/
 ```
+
+> 如果暂时没有课程内容，可以留空目录——后端会正常启动，之后再通过管理后台导入课程包。
 
 ---
 
@@ -359,27 +380,38 @@ sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
-### 10.2 构建项目镜像
+### 10.2 生成 bun.lock（必须）
+
+Dockerfile 基于 Bun，但项目是用 npm 创建的。构建镜像前必须先运行：
+
+```bash
+cd /opt/hdu-ride/frontend-react
+bun install
+cd /opt/hdu-ride
+```
+
+> 这会生成 `bun.lock` 文件。如果跳过这一步，Docker 构建会报 `COPY failed: stat bun.lock: file does not exist`。
+
+### 10.3 构建项目镜像
 
 ```bash
 cd /opt/hdu-ride
-
-# ① 构建前端前，先生成 bun.lock（项目由 npm 创建，Dockerfile 基于 Bun）
-cd frontend-react && bun install && cd ..
-
-# ② 构建镜像
 sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
-sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile \
+
+sudo docker build -t hdu-ride-frontend:latest \
+  -f deploy/docker/frontend.Dockerfile \
   --build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080 \
   .
 ```
+
+> `--build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080` 是**生产环境必须的**。它告诉 Next.js 在 K8s 集群内部用 Service 名 `hdu-ride-backend` 来代理 `/api` 和 `/ide` 请求。如果不传这个参数，默认值是 `http://localhost:8080`，在 K8s 环境下会导致所有 API 请求失败。
 
 说明：
 
 - `backend.Dockerfile`：Go 1.26 编译 → Alpine 运行，暴露 8080
 - `frontend.Dockerfile`：Bun 构建 Next.js standalone → Bun slim 运行，暴露 3000
 
-### 10.3 拉取运行期镜像
+### 10.4 拉取运行期镜像
 
 ```bash
 sudo docker pull postgres:18-alpine
@@ -397,9 +429,9 @@ sudo docker tag docker.m.daocloud.io/postgres:18-alpine postgres:18-alpine
 # 其他镜像同理
 ```
 
-### 10.4 导入到 containerd
+### 10.5 把 Docker 镜像导入 containerd
 
-Kubernetes 运行时是 `containerd`，不是 Docker。必须把镜像导入：
+Kubernetes 运行时是 `containerd`，不是 Docker。必须把镜像从 Docker 导出再导入 containerd：
 
 ```bash
 cd /tmp
@@ -425,6 +457,7 @@ sudo ctr -n k8s.io images import rstudio.tar
 
 ```bash
 sudo ctr -n k8s.io images list | grep -E 'hdu-ride|postgres|minio|busybox|rstudio'
+# 应列出 7 个镜像
 ```
 
 ---
@@ -445,6 +478,8 @@ bash scripts/k8s-prod-up.sh
 5. 部署 Go 后端、React 前端
 6. 等待所有 Pod Ready
 
+> 如果出现 `deployment exceeded its progress deadline`，通常是镜像没导入 containerd（回到 10.5 检查），或者 `.env` 中 `ROOT_PASSWORD_HASH` 为空导致后端启动失败。
+
 ### 验证
 
 ```bash
@@ -459,7 +494,7 @@ kubectl get svc -n hdu-ride
 - `hdu-ride-backend-...`
 - `hdu-ride-frontend-...`
 
-前端 NodePort 默认为 `127.0.0.1:30080`。
+前端 NodePort 为 `127.0.0.1:30080`。
 
 ---
 
@@ -503,6 +538,7 @@ server {
 sudo ln -sf /etc/nginx/sites-available/hdu-ride /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
+# 应输出: syntax is ok / test is successful
 sudo systemctl reload nginx
 ```
 
@@ -517,10 +553,11 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d ride.mindsratch.top
 ```
 
-验证自动续期：
+按提示输入邮箱并同意条款。验证自动续期：
 
 ```bash
 sudo certbot renew --dry-run
+# 应输出: Congratulations, all renewals succeeded
 ```
 
 ---
@@ -530,7 +567,7 @@ sudo certbot renew --dry-run
 站点能打开只代表服务启动成功，还需要业务初始化：
 
 1. **管理员登录**：用 `.env` 中 `ROOT_USERNAME` / `ROOT_PASSWORD` 登录
-2. **导入课程**：管理 → 课程内容 → 上传课程 zip 或配置宿主机 `/opt/hdu-ride/content` 后点击"重新加载"
+2. **导入课程**：管理 → 课程管理 → 导入课程包 zip，或配置宿主机 `/opt/hdu-ride/content` 后点击"重新加载"
 3. **创建班级**：在班级页面新建班级并绑定课程
 4. **创建学生账号**：管理 → 用户管理 → 新建用户
 5. **将学生加入班级**：进入班级 → 成员 → 导入学生
@@ -550,19 +587,27 @@ React 版新增的 AI 助手使用阿里云百炼平台（通义千问）。
 
 1. 登录 [阿里云百炼平台](https://bailian.console.aliyun.com/)
 2. 创建应用，获取 `API Key` 和 `App ID`
-3. 确保已开通模型服务（推荐 `qwen-plus`）
+3. 确保已开通模型服务
 
 ### 15.2 配置方式
 
-**生产环境（K8s）**：密钥通过 `k8s-prod-up.sh` 自动写入 K8s Secret：
+**生产环境（K8s）**：密钥通过 `.env` 中的 `BAILIAN_API_KEY` 和 `BAILIAN_APP_ID` 自动写入 K8s Secret，并注入到前端容器。
+
+**验证配置是否生效**：
 
 ```bash
-# 确认 .env 中有这两行
-BAILIAN_API_KEY=sk-xxxxxxxxxxxxxxxx
-BAILIAN_APP_ID=xxxxxxxxxxxxxxxx
+kubectl exec -n hdu-ride deploy/hdu-ride-frontend -- env | grep BAILIAN
+# 应输出: BAILIAN_API_KEY=sk-... / BAILIAN_APP_ID=...
 ```
 
-**开发环境**：写在 `frontend-react/.env.local`：
+**开发环境（本地）**：复制 `frontend-react/.env.local.example` 为 `.env.local` 并填入真实值：
+
+```bash
+cp frontend-react/.env.local.example frontend-react/.env.local
+nano frontend-react/.env.local
+```
+
+内容：
 
 ```env
 BAILIAN_API_KEY=sk-xxxxxxxxxxxxxxxx
@@ -570,44 +615,37 @@ BAILIAN_APP_ID=xxxxxxxxxxxxxxxx
 NEXT_PUBLIC_GO_API_URL=http://localhost:8080
 ```
 
-### 15.3 切换模型
-
-编辑 `frontend-react/app/api/copilotkit/route.ts`：
-
-```typescript
-const serviceAdapter = new OpenAIAdapter({
-  openai,
-  model: 'qwen-plus',  // 可选: qwen-turbo（快）, qwen-plus（均衡）, qwen-max（最强）
-})
-```
-
-### 15.4 AI 助手无响应时的排查
+### 15.3 AI 助手无响应时的排查
 
 ```bash
-# 直接测试百炼 API
-curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions \
+# 在服务器上直接测试百炼 API
+curl -X POST https://dashscope.aliyuncs.com/api/v1/apps/$BAILIAN_APP_ID/completion \
   -H "Authorization: Bearer $BAILIAN_API_KEY" \
-  -H "X-DashScope-AppId: $BAILIAN_APP_ID" \
+  -H "X-DashScope-SSE: enable" \
   -H "Content-Type: application/json" \
-  -d '{"model":"qwen-plus","messages":[{"role":"user","content":"你好"}]}'
+  -d '{"input":{"prompt":"你好"},"parameters":{}}'
 ```
+
+应收到 SSE 流式响应。如果没有：
+- 检查 `.env` 中 `BAILIAN_API_KEY` 和 `BAILIAN_APP_ID` 是否正确
+- 百炼控制台是否开通了模型服务
+- 查看前端容器日志：`kubectl logs -n hdu-ride deploy/hdu-ride-frontend --tail=50`
 
 ---
 
 ## 16. 前端 Markdown / LaTeX 公式说明
 
-React 版使用 `react-markdown + remark-math + rehype-katex` 渲染公式，替代旧版的 `markdown-it`。
+React 版使用 `react-markdown + remark-math + rehype-katex` 渲染公式。
 
 支持的公式格式：
 
 - 行内公式：`$E = mc^2$`
 - 块级公式：`$$\hat{\beta} = (X^TX)^{-1}X^Ty$$`
-- 对齐环境需包裹：`\begin{aligned} ... \end{aligned}`
 
 如果公式不渲染，检查：
 
-1. `frontend-react/app/globals.css` 中有 `@import 'katex/dist/katex.min.css';`
-2. `components/markdown/MarkdownRenderer.tsx` 中插件已正确配置
+1. `frontend-react/app/globals.css` 中是否有 `@import 'katex/dist/katex.min.css';`
+2. `components/markdown/MarkdownRenderer.tsx` 中插件是否已正确配置
 
 ---
 
@@ -661,37 +699,61 @@ kubectl describe pod <pod名> -n hdu-ride
 
 - 存储类缺失 → 执行第 7 节
 - 资源不足 → 调低 `.env` 中的 `WORKSPACE_CPU_REQUEST` 和 `WORKSPACE_MEM_REQUEST`
-- 镜像未导入 → 执行第 10.4 节
+- 镜像未导入 → 执行第 10.5 节
 
-### 18.3 RStudio 打不开
+### 18.3 后端 CrashLoopBackOff
+
+最常见的原因是 `/content` 目录为空且之前旧版代码对此做了严格检查（现已修复，空目录不会导致 crash）。如果仍然出现，请检查后端日志：
+
+```bash
+kubectl logs -n hdu-ride -l app.kubernetes.io/name=hdu-ride-backend --tail=50
+```
+
+### 18.4 RStudio 打不开
 
 1. 确认学生已加入班级
 2. 确认 `local-path` 存储类正常
 3. 确认 `rocker/rstudio:4.6.0` 已导入 containerd
 4. 确认 Nginx 配置了 WebSocket 头（`Upgrade` / `Connection`）
 
-### 18.4 页面空白 / 登录后跳回登录页
+### 18.5 页面空白 / 登录后跳回登录页
 
 - Go 后端是否在运行
-- 浏览器 DevTools → Application → Cookies 检查 `session_token`
+- 浏览器 DevTools → Application → Cookies 检查 `hdu_ride_session`
+- 前端 proxy 是否正常工作：查看前端容器日志
 
-### 18.5 AI 助手报错
+### 18.6 502 Bad Gateway
+
+确认前端 NodePort 是 `30080`：
+
+```bash
+kubectl get svc -n hdu-ride hdu-ride-frontend -o jsonpath='{.spec.ports[0].nodePort}'
+# 应输出: 30080
+```
+
+如果不是 30080，检查 `deploy/k8s/frontend.yml` 中 `nodePort` 字段，并确认 Nginx 配置中的 `proxy_pass` 端口与其一致。
+
+### 18.7 AI 助手报错
 
 - `.env` 中的 `BAILIAN_API_KEY` 和 `BAILIAN_APP_ID` 是否正确
-- 百炼控制台是否开通了 `qwen-plus` 模型
-- 查看前端容器日志：`kubectl logs deploy/hdu-ride-frontend -n hdu-ride`
+- 百炼控制台是否开通了应用服务
+- 查看前端容器日志：`kubectl logs deploy/hdu-ride-frontend -n hdu-ride --tail=50`
 
-### 18.6 修改课程内容后页面未生效
+### 18.8 修改课程内容后页面未生效
 
-课程内容被后端加载到内存中。修改 `/opt/hdu-ride/content/` 后：
+课程内容被后端加载到内存中。修改 `/opt/hdu-ride/content/` 后需要触发重载：
 
 1. 登录管理员后台
 2. 进入课程管理页
 3. 点击"重新加载"
 
+或者执行脚本：`bash scripts/update-content.sh`
+
 ---
 
 ## 19. 快速部署总结（完整命令序列）
+
+以下是各步骤的命令汇总，**按顺序执行**即可完成从零到上线的全过程：
 
 ```bash
 # === 第 1 步：基础环境 ===
@@ -709,13 +771,15 @@ go env -w GOPROXY=https://goproxy.cn,direct
 curl -fsSL https://bun.sh/install | bash && source ~/.bashrc
 
 # === 第 4 步：安装 K8s + 初始化集群 ===
-# （执行第 6 节完整步骤）
+# 执行第 6 节完整步骤（6.1 到 6.7）
 
 # === 第 5 步：安装 Flannel + local-path ===
-# （执行第 6.7 和 第 7 节）
+cd /opt/hdu-ride
+bash scripts/k8s-install-flannel.sh
+bash scripts/k8s-install-local-path.sh
 
 # === 第 6 步：获取代码 ===
-cd ~ && git clone <repo-url> hdu-ride
+cd ~ && git clone https://github.com/MindScrath/HDU-RIDE.git hdu-ride
 sudo cp -a ~/hdu-ride /opt/hdu-ride && sudo chown -R $USER:$USER /opt/hdu-ride
 cd /opt/hdu-ride
 
@@ -725,13 +789,14 @@ cp .env.example .env && nano .env
 #       SESSION_SECRET, ROOT_PASSWORD, BAILIAN_API_KEY, BAILIAN_APP_ID
 cd backend && go run . hash-password '你的密码' && cd ..
 # 把输出的哈希填入 .env 的 ROOT_PASSWORD_HASH
+mkdir -p /opt/hdu-ride/content
 
 # === 第 8 步：构建 + 导入镜像 ===
-cd frontend-react && bun install && cd ..   # 生成 bun.lock（必须）
+cd frontend-react && bun install && cd ..    # 生成 bun.lock（必须）
 sudo docker build -t hdu-ride-backend:latest -f deploy/docker/backend.Dockerfile .
-sudo docker build -t hdu-ride-frontend:latest -f deploy/docker/frontend.Dockerfile \
-  --build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080 \
-  .
+sudo docker build -t hdu-ride-frontend:latest \
+  -f deploy/docker/frontend.Dockerfile \
+  --build-arg NEXT_PUBLIC_GO_API_URL=http://hdu-ride-backend:8080 .
 sudo docker pull postgres:18-alpine && sudo docker pull minio/minio:latest
 sudo docker pull minio/mc:latest && sudo docker pull busybox:1.36
 sudo docker pull rocker/rstudio:4.6.0
@@ -755,6 +820,7 @@ cd /opt/hdu-ride && bash scripts/k8s-prod-up.sh
 # === 第 10 步：Nginx + HTTPS ===
 sudo nano /etc/nginx/sites-available/hdu-ride   # 参考第 12 节
 sudo ln -sf /etc/nginx/sites-available/hdu-ride /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d ride.mindsratch.top
 
