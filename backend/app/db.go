@@ -42,6 +42,27 @@ create table if not exists sessions (
   created_at timestamptz not null default now()
 );
 
+create table if not exists courses (
+  id text primary key,
+  name text not null,
+  code text not null unique,
+  description text not null default '',
+  status text not null check (status in ('active','archived')) default 'active',
+  content_root text not null default '',
+  created_by text not null references users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists course_members (
+  course_id text not null references courses(id) on delete cascade,
+  user_id text not null references users(id) on delete cascade,
+  member_role text not null check (member_role in ('admin','teacher')),
+  joined_at timestamptz not null default now(),
+  invited_by text references users(id),
+  primary key (course_id, user_id)
+);
+
 create table if not exists classes (
   id text primary key,
   course_id text not null,
@@ -112,7 +133,43 @@ insert into users (id, username, display_name, password_hash, role, status)
 values ($1, $2, 'Root', $3, 'root', 'active')
 on conflict (username) do nothing
 `, uuid.NewString(), cfg.RootUsername, cfg.RootPasswordHash)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migrate existing classes → courses
+	if _, err := db.Exec(ctx, `
+insert into courses (id, name, code, description, created_by)
+select distinct on (c.course_id)
+  gen_random_uuid()::text,
+  c.course_id,
+  c.course_id,
+  '',
+  c.created_by
+from classes c
+where not exists (select 1 from courses co where co.code = c.course_id)
+`); err != nil {
+		return err
+	}
+
+	// Auto-enroll class creators as course teachers
+	if _, err := db.Exec(ctx, `
+insert into course_members (course_id, user_id, member_role)
+select distinct on (co.id, c.created_by)
+  co.id,
+  c.created_by,
+  'teacher'
+from classes c
+join courses co on co.code = c.course_id
+where not exists (
+  select 1 from course_members cm
+  where cm.course_id = co.id and cm.user_id = c.created_by
+)
+`); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func InitSchema(ctx context.Context, db *pgxpool.Pool, cfg Config) error {
