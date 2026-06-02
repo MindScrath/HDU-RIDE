@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export function proxy(request: NextRequest) {
-  const sessionToken = request.cookies.get('session_token')?.value
+  const sessionToken = request.cookies.get('hdu_ride_session')?.value
   const { pathname } = request.nextUrl
 
   // Allow API routes to pass through (handled by Go backend or Next.js API routes)
