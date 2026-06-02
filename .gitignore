@@ -9,3 +9,4 @@ storage/
 tmp/
 .trae/
 .playwright-mcp.env.local
+.vscode/
