@@ -76,6 +76,12 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api.POST("/admin/users/:id/password", app.resetUserPassword)
 	api.POST("/admin/courses/import", app.importCourse)
 	api.POST("/admin/courses/reload", app.reloadCourses)
+	api.GET("/admin/courses", app.listCourses)
+	api.POST("/admin/courses", app.createCourse)
+	api.PATCH("/admin/courses/:courseID", app.updateCourse)
+	api.GET("/admin/courses/:courseID/members", app.listCourseMembers)
+	api.POST("/admin/courses/:courseID/members", app.addCourseMember)
+	api.DELETE("/admin/courses/:courseID/members/:userID", app.removeCourseMember)
 	api.POST("/ai/chat", app.chatAI)
 	api.POST("/ai/upload", app.uploadAIFile)
 
@@ -1721,6 +1727,202 @@ func readStudentsCSV(src io.Reader) ([]studentImport, error) {
 		})
 	}
 	return students, nil
+}
+
+// ── Course Management ─────────────────────────────────────────
+
+func (a *App) listCourses(c *gin.Context) {
+	user := currentUser(c)
+	rows, err := a.db.Query(c.Request.Context(), `
+select co.id, co.name, co.code, co.description, co.status, co.content_root,
+       co.created_by, co.created_at, co.updated_at,
+       (select count(*) from course_members cm where cm.course_id = co.id) as member_count,
+       (select count(*) from classes cl where cl.course_id = co.code) as class_count
+from courses co
+where exists (
+  select 1 from course_members cm where cm.course_id = co.id and cm.user_id = $1
+) or $2 in ('root','admin')
+order by co.created_at desc
+`, user.ID, user.Role)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+	defer rows.Close()
+
+	type courseRow struct {
+		ID          string    `json:"id"`
+		Name        string    `json:"name"`
+		Code        string    `json:"code"`
+		Description string    `json:"description"`
+		Status      string    `json:"status"`
+		ContentRoot string    `json:"contentRoot"`
+		CreatedBy   string    `json:"createdBy"`
+		CreatedAt   time.Time `json:"createdAt"`
+		UpdatedAt   time.Time `json:"updatedAt"`
+		MemberCount int       `json:"memberCount"`
+		ClassCount  int       `json:"classCount"`
+	}
+	var courses []courseRow
+	for rows.Next() {
+		var r courseRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.Code, &r.Description, &r.Status, &r.ContentRoot, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt, &r.MemberCount, &r.ClassCount); err != nil {
+			continue
+		}
+		courses = append(courses, r)
+	}
+	c.JSON(http.StatusOK, gin.H{"courses": courses})
+}
+
+func (a *App) createCourse(c *gin.Context) {
+	user := currentUser(c)
+	if user.Role != RoleRoot {
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅 root 可创建课程"})
+		return
+	}
+	var req struct {
+		Name        string `json:"name" binding:"required"`
+		Code        string `json:"code" binding:"required"`
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid course request"})
+		return
+	}
+	id := uuid.NewString()
+	_, err := a.db.Exec(c.Request.Context(), `
+insert into courses (id, name, code, description, created_by)
+values ($1,$2,$3,$4,$5)
+`, id, req.Name, req.Code, req.Description, user.ID)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "课程创建失败，code 可能重复"})
+		return
+	}
+	_, _ = a.db.Exec(c.Request.Context(), `
+insert into course_members (course_id, user_id, member_role, invited_by)
+values ($1,$2,'admin',$3)
+on conflict do nothing
+`, id, user.ID, user.ID)
+	logEvent(c.Request.Context(), a.db, user.ID, "course.create", id)
+	c.JSON(http.StatusCreated, gin.H{"id": id})
+}
+
+func (a *App) updateCourse(c *gin.Context) {
+	user := currentUser(c)
+	courseID := c.Param("courseID")
+	if !a.isCourseAdmin(c.Request.Context(), user.ID, courseID) && user.Role != RoleRoot {
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅课程管理员可编辑"})
+		return
+	}
+	var req struct {
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+		Status      *string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Name != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update courses set name=$1, updated_at=now() where id=$2`, *req.Name, courseID)
+	}
+	if req.Description != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update courses set description=$1, updated_at=now() where id=$2`, *req.Description, courseID)
+	}
+	if req.Status != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update courses set status=$1, updated_at=now() where id=$2`, *req.Status, courseID)
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "course.update", courseID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) listCourseMembers(c *gin.Context) {
+	user := currentUser(c)
+	courseID := c.Param("courseID")
+	if !a.isCourseAdmin(c.Request.Context(), user.ID, courseID) && user.Role != RoleRoot {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	rows, err := a.db.Query(c.Request.Context(), `
+select cm.user_id, u.username, u.display_name, u.role, cm.member_role, cm.joined_at, cm.invited_by
+from course_members cm
+join users u on u.id = cm.user_id
+where cm.course_id = $1
+order by cm.joined_at desc
+`, courseID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+	defer rows.Close()
+	type memberRow struct {
+		UserID     string    `json:"userId"`
+		Username   string    `json:"username"`
+		GlobalRole string    `json:"globalRole"`
+		MemberRole string    `json:"memberRole"`
+		JoinedAt   time.Time `json:"joinedAt"`
+		InvitedBy  *string   `json:"invitedBy"`
+	}
+	var members []memberRow
+	for rows.Next() {
+		var m memberRow
+		if err := rows.Scan(&m.UserID, &m.Username, &m.GlobalRole, &m.MemberRole, &m.JoinedAt, &m.InvitedBy); err != nil {
+			continue
+		}
+		members = append(members, m)
+	}
+	c.JSON(http.StatusOK, gin.H{"members": members})
+}
+
+func (a *App) addCourseMember(c *gin.Context) {
+	user := currentUser(c)
+	courseID := c.Param("courseID")
+	if !a.isCourseAdmin(c.Request.Context(), user.ID, courseID) && user.Role != RoleRoot {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		UserID string `json:"userId" binding:"required"`
+		Role   string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Role != "admin" && req.Role != "teacher" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "role must be admin or teacher"})
+		return
+	}
+	_, err := a.db.Exec(c.Request.Context(), `
+insert into course_members (course_id, user_id, member_role, invited_by)
+values ($1,$2,$3,$4)
+on conflict (course_id, user_id) do update set member_role=$3
+`, courseID, req.UserID, req.Role, user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "添加成员失败"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "course.add_member", courseID+":"+req.UserID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) removeCourseMember(c *gin.Context) {
+	user := currentUser(c)
+	courseID := c.Param("courseID")
+	targetUserID := c.Param("userID")
+	if !a.isCourseAdmin(c.Request.Context(), user.ID, courseID) && user.Role != RoleRoot {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	if user.ID == targetUserID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不能移除自己"})
+		return
+	}
+	_, _ = a.db.Exec(c.Request.Context(), `
+delete from course_members where course_id=$1 and user_id=$2
+`, courseID, targetUserID)
+	logEvent(c.Request.Context(), a.db, user.ID, "course.remove_member", courseID+":"+targetUserID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func nullString(value sql.NullString) any {

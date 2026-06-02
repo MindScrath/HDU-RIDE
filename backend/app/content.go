@@ -239,8 +239,6 @@ func (s *CourseStore) Reload(defaultImage string) error {
 }
 
 func (s *CourseStore) Courses() []*CourseBundle {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	out := make([]*CourseBundle, 0, len(s.courses))
 	for _, c := range s.courses {
 		out = append(out, c)

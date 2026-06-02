@@ -204,3 +204,25 @@ func classCourse(ctx context.Context, db *pgxpool.Pool, classID string) (string,
 	}
 	return courseID, err
 }
+
+func (a *App) isCourseAdmin(ctx context.Context, userID, courseID string) bool {
+	var exists bool
+	err := a.db.QueryRow(ctx, `
+select exists(select 1 from course_members where course_id=$1 and user_id=$2 and member_role='admin')
+`, courseID, userID).Scan(&exists)
+	return err == nil && exists
+}
+
+func (a *App) isCourseTeacher(ctx context.Context, userID, courseID string) bool {
+	var exists bool
+	err := a.db.QueryRow(ctx, `
+select exists(select 1 from course_members where course_id=$1 and user_id=$2 and member_role in ('admin','teacher'))
+`, courseID, userID).Scan(&exists)
+	return err == nil && exists
+}
+
+func (a *App) courseIDFromCode(ctx context.Context, code string) (string, error) {
+	var id string
+	err := a.db.QueryRow(ctx, `select id from courses where code=$1`, code).Scan(&id)
+	return id, err
+}
