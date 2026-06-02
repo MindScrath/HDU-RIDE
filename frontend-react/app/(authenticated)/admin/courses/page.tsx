@@ -185,6 +185,10 @@ export default function AdminCoursesPage() {
                       编辑
                     </Button>
                     <Button variant="outline" size="sm"
+                      onClick={() => router.push(`/admin/courses/${c.id}/lectures`)}>
+                      讲义
+                    </Button>
+                    <Button variant="outline" size="sm"
                       onClick={() => router.push(`/admin/courses/${c.id}/members`)}>
                       成员
                     </Button>

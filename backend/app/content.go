@@ -246,6 +246,13 @@ func (s *CourseStore) Courses() []*CourseBundle {
 	return out
 }
 
+func (c *CourseBundle) ByLecture(id string) (lectureFile, bool) {
+	item, ok := c.byLecture[id]
+	return item, ok
+}
+
+func (c *CourseBundle) DefaultImage() string { return "" }
+
 func (c *CourseBundle) RenderLecture(id string) (string, error) {
 	item, ok := c.byLecture[id]
 	if !ok {

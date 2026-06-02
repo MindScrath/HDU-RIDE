@@ -82,6 +82,9 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api.POST("/admin/users/:id/password", app.resetUserPassword)
 	api.POST("/admin/courses/import", app.importCourse)
 	api.POST("/admin/courses/reload", app.reloadCourses)
+	api.GET("/admin/courses/:courseID/lectures", app.listCourseLectures)
+	api.GET("/admin/courses/:courseID/lectures/:lectureID", app.getLectureContent)
+	api.PUT("/admin/courses/:courseID/lectures/:lectureID", app.saveLectureContent)
 	api.GET("/admin/courses", app.listCourses)
 	api.POST("/admin/courses", app.createCourse)
 	api.PATCH("/admin/courses/:courseID", app.updateCourse)
@@ -2086,6 +2089,85 @@ func (a *App) deleteAssignment(c *gin.Context) {
 	}
 	_, _ = a.db.Exec(c.Request.Context(), `delete from class_assignments where id=$1 and class_id=$2`, assignmentID, classID)
 	logEvent(c.Request.Context(), a.db, user.ID, "assignment.delete", classID+":"+assignmentID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// ── Lecture Editor ────────────────────────────────────────────
+
+func (a *App) listCourseLectures(c *gin.Context) {
+	courseID := c.Param("courseID")
+	course, ok := a.content.Course(courseID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "course not found"})
+		return
+	}
+	type sectionMeta struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		Order int    `json:"order"`
+	}
+	type chapterMeta struct {
+		ID       string        `json:"id"`
+		Title    string        `json:"title"`
+		Order    int           `json:"order"`
+		Sections []sectionMeta `json:"sections"`
+	}
+	var chapters []chapterMeta
+	for _, ch := range course.Lectures {
+		var sections []sectionMeta
+		for _, s := range ch.Sections {
+			sections = append(sections, sectionMeta{ID: s.ID, Title: s.Title, Order: s.Order})
+		}
+		chapters = append(chapters, chapterMeta{ID: ch.ID, Title: ch.Title, Order: ch.Order, Sections: sections})
+	}
+	c.JSON(http.StatusOK, gin.H{"lectures": chapters})
+}
+
+func (a *App) getLectureContent(c *gin.Context) {
+	courseID := c.Param("courseID")
+	lectureID := c.Param("lectureID")
+	course, ok := a.content.Course(courseID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "course not found"})
+		return
+	}
+	markdown, err := course.RenderLecture(lectureID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "lecture not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": lectureID, "content": markdown, "title": lectureID})
+}
+
+func (a *App) saveLectureContent(c *gin.Context) {
+	user := currentUser(c)
+	courseID := c.Param("courseID")
+	lectureID := c.Param("lectureID")
+	course, ok := a.content.Course(courseID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "course not found"})
+		return
+	}
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	// Write back to file system
+	item, ok := course.ByLecture(lectureID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "lecture not found"})
+		return
+	}
+	if err := os.WriteFile(item.Path, []byte(req.Content), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "save failed: " + err.Error()})
+		return
+	}
+	// Reload course to pick up changes
+	_ = a.content.Reload("default")
+	logEvent(c.Request.Context(), a.db, user.ID, "lecture.edit", courseID+":"+lectureID)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 func nullString(value sql.NullString) any {
