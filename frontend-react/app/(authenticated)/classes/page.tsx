@@ -25,7 +25,7 @@ export default function ClassesPage() {
   const [classes, setClasses] = useState<ClassItem[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [createOpen, setCreateOpen] = useState(false)
-  const [form, setForm] = useState({ courseId: 'intro-r', name: '', term: '2026 春', note: '' })
+  const [form, setForm] = useState({ courseId: 'intro-r', name: '', term: '2026 春', note: '', teacherIds: '' })
 
   const canManage = ['root', 'admin', 'teacher'].includes(user?.role ?? '')
 
@@ -42,10 +42,14 @@ export default function ClassesPage() {
 
   async function handleCreate() {
     try {
-      await api.post('/api/classes', form)
+      const teacherIds = form.teacherIds
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+      await api.post('/api/classes', { ...form, teacherIds })
       toast.success('班级已创建')
       setCreateOpen(false)
-      setForm({ courseId: 'intro-r', name: '', term: '2026 春', note: '' })
+      setForm({ courseId: 'intro-r', name: '', term: '2026 春', note: '', teacherIds: '' })
       await load()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '创建班级失败')
@@ -138,6 +142,7 @@ export default function ClassesPage() {
             <div><Label>班级名称</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
             <div><Label>学期</Label><Input value={form.term} onChange={(e) => setForm({ ...form, term: e.target.value })} /></div>
             <div><Label>备注</Label><Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></div>
+            <div><Label>教师 ID（逗号分隔）</Label><Input value={form.teacherIds} onChange={(e) => setForm({ ...form, teacherIds: e.target.value })} placeholder="user1,user2" /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>

@@ -46,6 +46,9 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api.POST("/classes/bulk", app.bulkClasses)
 	api.GET("/classes/:classID", app.getClass)
 	api.DELETE("/classes/:classID", app.deleteClass)
+	api.GET("/classes/:classID/teachers", app.listClassTeachers)
+	api.POST("/classes/:classID/teachers", app.addClassTeacher)
+	api.DELETE("/classes/:classID/teachers/:userID", app.removeClassTeacher)
 	api.GET("/classes/:classID/members", app.listMembers)
 	api.POST("/classes/:classID/members/import", app.importMembers)
 	api.POST("/classes/:classID/members/bulk", app.bulkMembers)
@@ -205,10 +208,11 @@ func (a *App) createClass(c *gin.Context) {
 		return
 	}
 	var req struct {
-		CourseID string `json:"courseId" binding:"required"`
-		Name     string `json:"name" binding:"required"`
-		Term     string `json:"term" binding:"required"`
-		Note     string `json:"note"`
+		CourseID   string   `json:"courseId" binding:"required"`
+		Name       string   `json:"name" binding:"required"`
+		Term       string   `json:"term" binding:"required"`
+		Note       string   `json:"note"`
+		TeacherIDs []string `json:"teacherIds"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid class request"})
@@ -231,6 +235,13 @@ insert into classes (id, course_id, name, term, note, created_by) values ($1,$2,
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "class create failed"})
 		return
+	}
+	// 创建者自动成为班级教师
+	_, _ = a.db.Exec(c.Request.Context(), `insert into class_teachers (class_id, user_id) values ($1,$2) on conflict do nothing`, classID, user.ID)
+	for _, tid := range req.TeacherIDs {
+		if tid != user.ID {
+			_, _ = a.db.Exec(c.Request.Context(), `insert into class_teachers (class_id, user_id) values ($1,$2) on conflict do nothing`, classID, tid)
+		}
 	}
 	logEvent(c.Request.Context(), a.db, user.ID, "class.create", classID)
 	c.JSON(http.StatusCreated, gin.H{"id": classID})
@@ -1706,6 +1717,76 @@ func readStudentsCSV(src io.Reader) ([]studentImport, error) {
 		})
 	}
 	return students, nil
+}
+
+// ── Class Teacher Management ──────────────────────────────────
+
+func (a *App) listClassTeachers(c *gin.Context) {
+	classID := c.Param("classID")
+	rows, err := a.db.Query(c.Request.Context(), `
+select ct.user_id, u.username, u.display_name, u.role
+from class_teachers ct join users u on u.id = ct.user_id
+where ct.class_id = $1
+order by u.display_name
+`, classID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+	defer rows.Close()
+	type teacherRow struct {
+		UserID      string `json:"userId"`
+		Username    string `json:"username"`
+		DisplayName string `json:"displayName"`
+		GlobalRole  string `json:"globalRole"`
+	}
+	var teachers []teacherRow
+	for rows.Next() {
+		var t teacherRow
+		if err := rows.Scan(&t.UserID, &t.Username, &t.DisplayName, &t.GlobalRole); err != nil {
+			continue
+		}
+		teachers = append(teachers, t)
+	}
+	c.JSON(http.StatusOK, gin.H{"teachers": teachers})
+}
+
+func (a *App) addClassTeacher(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		UserID string `json:"userId" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	_, err := a.db.Exec(c.Request.Context(), `
+insert into class_teachers (class_id, user_id) values ($1,$2) on conflict do nothing
+`, classID, req.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "添加教师失败"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "class.add_teacher", classID+":"+req.UserID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) removeClassTeacher(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	targetID := c.Param("userID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	_, _ = a.db.Exec(c.Request.Context(), `delete from class_teachers where class_id=$1 and user_id=$2`, classID, targetID)
+	logEvent(c.Request.Context(), a.db, user.ID, "class.remove_teacher", classID+":"+targetID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // ── Course Management ─────────────────────────────────────────

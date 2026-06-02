@@ -73,6 +73,12 @@ create table if not exists classes (
   created_at timestamptz not null default now()
 );
 
+create table if not exists class_teachers (
+  class_id text not null references classes(id) on delete cascade,
+  user_id text not null references users(id) on delete cascade,
+  primary key (class_id, user_id)
+);
+
 create table if not exists class_members (
   class_id text not null references classes(id) on delete cascade,
   user_id text not null references users(id) on delete cascade,

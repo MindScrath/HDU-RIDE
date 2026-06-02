@@ -24,8 +24,11 @@ export default function ClassMembersPage() {
   const router = useRouter()
   const [klass, setKlass] = useState<ClassItem | null>(null)
   const [members, setMembers] = useState<MemberRow[]>([])
+  const [teachers, setTeachers] = useState<{ userId: string; username: string; displayName: string; globalRole: string }[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [importText, setImportText] = useState('username,displayName,password\nstudent001,学生一,student123')
+  const [addTeacherOpen, setAddTeacherOpen] = useState(false)
+  const [addTeacherId, setAddTeacherId] = useState('')
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [passwordTarget, setPasswordTarget] = useState<MemberRow | null>(null)
   const [newPassword, setNewPassword] = useState('')
@@ -37,9 +40,36 @@ export default function ClassMembersPage() {
     setKlass(klassData.class)
     const memData = await api.get<{ members: MemberRow[] }>(`/api/classes/${classId}/members`)
     setMembers(memData.members)
+    try {
+      const teacherData = await api.get<{ teachers: any[] }>(`/api/classes/${classId}/teachers`)
+      setTeachers(teacherData.teachers)
+    } catch { /* teachers endpoint may not exist yet */ }
   }
 
   useEffect(() => { load() }, [])
+
+  async function handleAddTeacher() {
+    try {
+      await api.post(`/api/classes/${classId}/teachers`, { userId: addTeacherId })
+      toast.success('教师已添加')
+      setAddTeacherOpen(false)
+      setAddTeacherId('')
+      await load()
+    } catch (err: any) {
+      toast.error(err.message ?? '添加教师失败')
+    }
+  }
+
+  async function handleRemoveTeacher(userId: string) {
+    if (!confirm('确定移除该教师？')) return
+    try {
+      await api.delete(`/api/classes/${classId}/teachers/${userId}`)
+      toast.success('教师已移除')
+      await load()
+    } catch (err: any) {
+      toast.error(err.message ?? '移除教师失败')
+    }
+  }
 
   async function handleImport() {
     const students = importText
@@ -102,6 +132,29 @@ export default function ClassMembersPage() {
             <Button variant="outline" onClick={() => router.push('/classes')}>返回班级</Button>
           </div>
         </div>
+        {/* Teachers Section */}
+        {canManage && teachers.length > 0 && (
+          <div className="px-4 pt-3 pb-1 border-b">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold">授课教师</h3>
+              <Button variant="outline" size="sm" onClick={() => setAddTeacherOpen(true)}>添加教师</Button>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {teachers.map(t => (
+                <span key={t.userId} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded text-sm">
+                  {t.displayName} ({t.username})
+                  <button className="text-red-400 hover:text-red-600 ml-1" onClick={() => handleRemoveTeacher(t.userId)}>×</button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {canManage && teachers.length === 0 && (
+          <div className="px-4 pt-3 pb-1 border-b flex items-center justify-between">
+            <span className="text-sm text-[#94a3b8]">暂无授课教师</span>
+            <Button variant="outline" size="sm" onClick={() => setAddTeacherOpen(true)}>添加教师</Button>
+          </div>
+        )}
         <div className="member-layout">
           {canManage && (
             <div className="member-import">
@@ -182,6 +235,23 @@ export default function ClassMembersPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setPasswordOpen(false)}>取消</Button>
             <Button onClick={handleSavePassword}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Teacher Dialog */}
+      <Dialog open={addTeacherOpen} onOpenChange={setAddTeacherOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader><DialogTitle>添加授课教师</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div>
+              <Label>教师用户 ID</Label>
+              <Input value={addTeacherId} onChange={e => setAddTeacherId(e.target.value)} placeholder="输入教师的 username 或 ID" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddTeacherOpen(false)}>取消</Button>
+            <Button onClick={handleAddTeacher} disabled={!addTeacherId}>添加</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
