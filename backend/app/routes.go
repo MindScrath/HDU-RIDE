@@ -208,10 +208,7 @@ func (a *App) createClass(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid class request"})
 		return
 	}
-	if _, ok := a.content.Course(req.CourseID); !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "course not found"})
-		return
-	}
+	// 即使课程尚未导入，也允许创建班级（讲义/作业列表会显示为空）
 	classID := uuid.NewString()
 	_, err := a.db.Exec(c.Request.Context(), `
 insert into classes (id, course_id, name, term, note, created_by) values ($1,$2,$3,$4,$5,$6)

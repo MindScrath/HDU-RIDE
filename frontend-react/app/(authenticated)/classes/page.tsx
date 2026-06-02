@@ -41,11 +41,15 @@ export default function ClassesPage() {
   useEffect(() => { load() }, [])
 
   async function handleCreate() {
-    await api.post('/api/classes', form)
-    toast.success('班级已创建')
-    setCreateOpen(false)
-    setForm({ courseId: 'intro-r', name: '', term: '2026 春', note: '' })
-    await load()
+    try {
+      await api.post('/api/classes', form)
+      toast.success('班级已创建')
+      setCreateOpen(false)
+      setForm({ courseId: 'intro-r', name: '', term: '2026 春', note: '' })
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '创建班级失败')
+    }
   }
 
   async function handleDelete(ids: string[]) {
