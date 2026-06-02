@@ -31,6 +31,26 @@ type Class struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type Course struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Code        string    `json:"code"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"`
+	ContentRoot string    `json:"contentRoot"`
+	CreatedBy   string    `json:"createdBy"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type CourseMember struct {
+	CourseID   string    `json:"courseId"`
+	UserID     string    `json:"userId"`
+	MemberRole string    `json:"memberRole"` // 'admin' | 'teacher'
+	JoinedAt   time.Time `json:"joinedAt"`
+	InvitedBy  string    `json:"invitedBy"`
+}
+
 type Submission struct {
 	ID           string    `json:"id"`
 	ClassID      string    `json:"classId"`

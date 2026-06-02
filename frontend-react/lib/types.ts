@@ -70,3 +70,27 @@ export interface MemberRow {
   memberRole: 'student' | 'assistant'
   joinedAt: string
 }
+
+export interface Course {
+  id: string
+  name: string
+  code: string
+  description: string
+  status: 'active' | 'archived'
+  contentRoot: string
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+  memberCount: number
+  classCount: number
+}
+
+export interface CourseMember {
+  userId: string
+  username: string
+  displayName: string
+  globalRole: Role
+  memberRole: 'admin' | 'teacher'
+  joinedAt: string
+  invitedBy: string
+}
