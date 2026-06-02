@@ -238,6 +238,16 @@ func (s *CourseStore) Reload(defaultImage string) error {
 	return nil
 }
 
+func (s *CourseStore) Courses() []*CourseBundle {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*CourseBundle, 0, len(s.courses))
+	for _, c := range s.courses {
+		out = append(out, c)
+	}
+	return out
+}
+
 func (c *CourseBundle) RenderLecture(id string) (string, error) {
 	item, ok := c.byLecture[id]
 	if !ok {
