@@ -6,6 +6,7 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|http://mirrors.aliyun.com/ubuntu
     sed -i 's|http://ports.ubuntu.com/ubuntu-ports/|http://mirrors.aliyun.com/ubuntu-ports/|g' /etc/apt/sources.list.d/ubuntu.sources
 
 # 安装编译 R 包所需的完整工具链和系统库
+# libuv1-dev: fs 包编译必需（缺失会导致 sass/bslib/rmarkdown/gargle 等 9+ 个包级联失败）
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -16,6 +17,7 @@ RUN apt-get update && \
     libssl-dev \
     libxml2-dev \
     libgit2-dev \
+    libuv1-dev \
     libharfbuzz-dev \
     libfribidi-dev \
     libfreetype6-dev \
