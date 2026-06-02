@@ -235,8 +235,9 @@ chown -R 1000:1000 /home/rstudio
 				},
 			}},
 			Containers: []corev1.Container{{
-				Name:  "rstudio",
-				Image: image,
+				Name:            "rstudio",
+				Image:           image,
+				ImagePullPolicy: corev1.PullIfNotPresent,
 				Env: []corev1.EnvVar{
 					{Name: "DISABLE_AUTH", Value: "true"},
 					{Name: "USERID", Value: "1000"},
