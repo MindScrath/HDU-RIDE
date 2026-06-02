@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table'
 import { api } from '@/lib/api'
 import { useSession } from '@/stores/session'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import { Plus, Pencil, Users, Upload } from 'lucide-react'
 import type { Course } from '@/lib/types'
@@ -21,6 +22,7 @@ import type { Course } from '@/lib/types'
 export default function AdminCoursesPage() {
   const user = useSession((s) => s.user)
   const router = useRouter()
+  const confirm = useConfirm()
   const isRoot = user?.role === 'root'
 
   const [courses, setCourses] = useState<Course[]>([])
@@ -77,8 +79,8 @@ export default function AdminCoursesPage() {
   }
 
   async function handleArchive(c: Course) {
-    if (!confirm(`确定归档课程「${c.name}」？归档后仍可恢复。`)) return
-    try {
+    confirm({ title: "归档课程", message: `确定归档课程「${c.name}」？归档后仍可恢复。`, onConfirm: async () => { await api.patch(`/api/admin/courses/${c.id}`, { status: "archived" }); toast.success("课程已归档"); await load(); } })
+
       await api.patch(`/api/admin/courses/${c.id}`, { status: 'archived' })
       toast.success('课程已归档')
       await load()

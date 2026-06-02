@@ -15,6 +15,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { api } from '@/lib/api'
 import { useSession } from '@/stores/session'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import type { ClassItem, MemberRow } from '@/lib/types'
 
@@ -33,6 +34,7 @@ export default function ClassMembersPage() {
   const [passwordTarget, setPasswordTarget] = useState<MemberRow | null>(null)
   const [newPassword, setNewPassword] = useState('')
 
+  const confirm = useConfirm()
   const canManage = ['root', 'admin', 'teacher'].includes(user?.role ?? '')
 
   async function load() {
@@ -61,8 +63,7 @@ export default function ClassMembersPage() {
   }
 
   async function handleRemoveTeacher(userId: string) {
-    if (!confirm('确定移除该教师？')) return
-    try {
+    confirm({ title: "移除教师", message: "确定移除该教师？", onConfirm: async () => { await api.delete(`/api/classes/${classId}/teachers/${userId}`); toast.success("教师已移除"); await load(); } }) 
       await api.delete(`/api/classes/${classId}/teachers/${userId}`)
       toast.success('教师已移除')
       await load()
@@ -85,7 +86,7 @@ export default function ClassMembersPage() {
 
   async function handleRemove(ids: string[]) {
     if (!ids.length) return
-    if (!confirm(`确定移除 ${ids.length} 个班级成员？账号本身会保留。`)) return
+    if (!ids.length) return
     await api.post(`/api/classes/${classId}/members/bulk`, { action: 'remove', userIds: ids })
     toast.success('成员已移除')
     setSelectedIds(new Set())

@@ -13,12 +13,14 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { api } from '@/lib/api'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
 import type { CourseMember } from '@/lib/types'
 
 export default function CourseMembersPage({ params }: { params: Promise<{ courseId: string }> }) {
   const { courseId } = use(params)
+  const confirm = useConfirm()
   const router = useRouter()
   const [members, setMembers] = useState<CourseMember[]>([])
   const [addOpen, setAddOpen] = useState(false)
@@ -48,8 +50,8 @@ export default function CourseMembersPage({ params }: { params: Promise<{ course
   }
 
   async function handleRemove(userId: string, name: string) {
-    if (!confirm(`确定移除「${name}」？`)) return
-    try {
+    confirm({ title: "移除成员", message: `确定移除「${name}」？`, onConfirm: async () => { await api.delete(`/api/admin/courses/${courseId}/members/${userId}`); toast.success("成员已移除"); await load(); } })
+
       await api.delete(`/api/admin/courses/${courseId}/members/${userId}`)
       toast.success('成员已移除')
       await load()

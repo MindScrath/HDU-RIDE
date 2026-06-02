@@ -14,6 +14,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { api, ApiError } from '@/lib/api'
 import { useSession } from '@/stores/session'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import type { ClassItem } from '@/lib/types'
 
@@ -22,6 +23,7 @@ export default function ClassesPage() {
   const isAdmin = useSession((s) => s.isAdmin)
   const canTeach = useSession((s) => s.canTeach)
   const router = useRouter()
+  const confirm = useConfirm()
   const [classes, setClasses] = useState<ClassItem[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [createOpen, setCreateOpen] = useState(false)
@@ -56,13 +58,18 @@ export default function ClassesPage() {
     }
   }
 
-  async function handleDelete(ids: string[]) {
+  function handleDelete(ids: string[]) {
     if (!ids.length) return
-    if (!confirm(`确定删除 ${ids.length} 个班级？关联成员、提交和成绩会一并删除。`)) return
-    await api.post('/api/classes/bulk', { action: 'delete', ids })
-    toast.success('班级已删除')
-    setSelectedIds(new Set())
-    await load()
+    confirm({
+      title: '删除班级',
+      message: `确定删除 ${ids.length} 个班级？关联成员、提交和成绩会一并删除。`,
+      onConfirm: async () => {
+        await api.post('/api/classes/bulk', { action: 'delete', ids })
+        toast.success('班级已删除')
+        setSelectedIds(new Set())
+        await load()
+      },
+    })
   }
 
   function toggleSelect(id: string) {
