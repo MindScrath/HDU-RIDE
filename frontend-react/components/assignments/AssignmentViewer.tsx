@@ -45,6 +45,9 @@ export function AssignmentViewer({ classId, assignmentId }: Props) {
   const router = useRouter()
   const user = useSession((s) => s.user)
   const isStudent = user?.role === 'student'
+  const canManage = ['root', 'admin', 'teacher'].includes(user?.role ?? '')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createForm, setCreateForm] = useState({ title: '', dueAt: '', rstudioImage: '', starter: '', submitPath: '' })
 
   const [classes, setClasses] = useState<ClassItem[]>([])
   const [entries, setEntries] = useState<AssignmentEntry[]>([])
@@ -162,6 +165,20 @@ export function AssignmentViewer({ classId, assignmentId }: Props) {
   }, [selected, activeClassId, isStudent])
 
   useEffect(() => { loadAssignment() }, [loadAssignment])
+
+  async function handleCreateAssignment() {
+    try {
+      await api.post(`/api/classes/${activeClassId}/assignments`, createForm)
+      toast.success('作业已创建')
+      setCreateOpen(false)
+      setCreateForm({ title: '', dueAt: '', rstudioImage: '', starter: '', submitPath: '' })
+      // Reload assignments list
+      const data = await api.get<{ assignments: Assignment[] }>(`/api/classes/${activeClassId}/assignments`)
+      setEntries(data.assignments.map(a => ({ assignment: a, classId: activeClassId, className: '', courseId: '' })))
+    } catch (err: any) {
+      toast.error(err.message ?? '创建失败')
+    }
+  }
 
   // Workspace
   async function waitForGateway(url: string) {
@@ -290,7 +307,14 @@ export function AssignmentViewer({ classId, assignmentId }: Props) {
       <div ref={gridRef} className="assignment-grid" style={gridStyle}>
         {/* Left: Assignment List */}
         <aside className="panel scroll">
-          <div className="panel-head"><h3>作业</h3></div>
+          <div className="panel-head">
+            <h3>作业</h3>
+            {canManage && activeClassId && (
+              <button className="text-blue-600 text-xs hover:underline" onClick={() => setCreateOpen(true)}>
+                + 新建
+              </button>
+            )}
+          </div>
           {!classId && (
             <div className="p-2 border-b">
               <Select value={classFilter} onValueChange={(v) => { setClassFilter(v ?? ''); router.push(v ? `?classId=${v}` : '/assignments') }}>
@@ -510,6 +534,24 @@ export function AssignmentViewer({ classId, assignmentId }: Props) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setGradeDialog(false)}>取消</Button>
             <Button onClick={saveGrade}>发布成绩</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Assignment Dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader><DialogTitle>新建作业</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div><Label>标题</Label><Input value={createForm.title} onChange={e => setCreateForm({ ...createForm, title: e.target.value })} /></div>
+            <div><Label>截止时间</Label><Input type="datetime-local" value={createForm.dueAt} onChange={e => setCreateForm({ ...createForm, dueAt: e.target.value })} /></div>
+            <div><Label>RStudio 镜像</Label><Input value={createForm.rstudioImage} onChange={e => setCreateForm({ ...createForm, rstudioImage: e.target.value })} placeholder="rocker/rstudio:4.6.0" /></div>
+            <div><Label>Starter 代码</Label><Input value={createForm.starter} onChange={e => setCreateForm({ ...createForm, starter: e.target.value })} /></div>
+            <div><Label>提交路径</Label><Input value={createForm.submitPath} onChange={e => setCreateForm({ ...createForm, submitPath: e.target.value })} placeholder="submit/" /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button onClick={handleCreateAssignment} disabled={!createForm.title}>创建</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

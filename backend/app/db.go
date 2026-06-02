@@ -73,6 +73,19 @@ create table if not exists classes (
   created_at timestamptz not null default now()
 );
 
+create table if not exists class_assignments (
+  id text primary key,
+  class_id text not null references classes(id) on delete cascade,
+  title text not null,
+  open_at timestamptz,
+  due_at timestamptz,
+  rstudio_image text,
+  starter text,
+  submit_path text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists class_teachers (
   class_id text not null references classes(id) on delete cascade,
   user_id text not null references users(id) on delete cascade,

@@ -58,6 +58,9 @@ func registerRoutes(router *gin.Engine, app *App) {
 	api.GET("/classes/:classID/lectures", app.listLectures)
 	api.GET("/classes/:classID/lectures/:lectureID", app.getLecture)
 	api.GET("/classes/:classID/assignments", app.listAssignments)
+	api.POST("/classes/:classID/assignments", app.createAssignment)
+	api.PATCH("/classes/:classID/assignments/:assignmentID", app.updateAssignment)
+	api.DELETE("/classes/:classID/assignments/:assignmentID", app.deleteAssignment)
 	api.GET("/classes/:classID/assignments/:assignmentID", app.getAssignment)
 	api.POST("/classes/:classID/assignments/:assignmentID/submit", app.submitAssignment)
 	api.GET("/classes/:classID/assignments/:assignmentID/submissions", app.listSubmissions)
@@ -591,11 +594,25 @@ func (a *App) getLecture(c *gin.Context) {
 }
 
 func (a *App) listAssignments(c *gin.Context) {
-	course, ok := a.classContent(c)
-	if !ok {
-		return
+	classID := c.Param("classID")
+	var out []AssignmentMeta
+	if course, ok := a.classContent(c); ok {
+		out = course.Assignments
 	}
-	c.JSON(http.StatusOK, gin.H{"assignments": course.Assignments})
+	rows, _ := a.db.Query(c.Request.Context(), `select id, title, open_at, due_at, rstudio_image, starter, submit_path from class_assignments where class_id=$1 order by created_at`, classID)
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var a AssignmentMeta
+			var openAt, dueAt sql.NullTime
+			if err := rows.Scan(&a.ID, &a.Title, &openAt, &dueAt, &a.RStudioImage, &a.Starter, &a.SubmitPath); err == nil {
+				if openAt.Valid { a.OpenAt = openAt.Time }
+				if dueAt.Valid { a.DueAt = dueAt.Time }
+				out = append(out, a)
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"assignments": out})
 }
 
 func (a *App) getAssignment(c *gin.Context) {
@@ -1985,6 +2002,92 @@ delete from course_members where course_id=$1 and user_id=$2
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+
+func (a *App) createAssignment(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		Title        string `json:"title" binding:"required"`
+		DueAt        string `json:"dueAt"`
+		RStudioImage string `json:"rstudioImage"`
+		Starter      string `json:"starter"`
+		SubmitPath   string `json:"submitPath"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	id := uuid.NewString()
+	var dueAt interface{}
+	if req.DueAt != "" {
+		dueAt = req.DueAt
+	}
+	_, err := a.db.Exec(c.Request.Context(), `
+insert into class_assignments (id, class_id, title, due_at, rstudio_image, starter, submit_path)
+values ($1,$2,$3,$4,$5,$6,$7)
+`, id, classID, req.Title, dueAt, req.RStudioImage, req.Starter, req.SubmitPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "create assignment failed"})
+		return
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "assignment.create", classID+":"+id)
+	c.JSON(http.StatusCreated, gin.H{"id": id})
+}
+
+func (a *App) updateAssignment(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	assignmentID := c.Param("assignmentID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		Title        *string `json:"title"`
+		DueAt        *string `json:"dueAt"`
+		RStudioImage *string `json:"rstudioImage"`
+		Starter      *string `json:"starter"`
+		SubmitPath   *string `json:"submitPath"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Title != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update class_assignments set title=$1, updated_at=now() where id=$2 and class_id=$3`, *req.Title, assignmentID, classID)
+	}
+	if req.DueAt != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update class_assignments set due_at=$1, updated_at=now() where id=$2 and class_id=$3`, *req.DueAt, assignmentID, classID)
+	}
+	if req.RStudioImage != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update class_assignments set rstudio_image=$1, updated_at=now() where id=$2 and class_id=$3`, *req.RStudioImage, assignmentID, classID)
+	}
+	if req.Starter != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update class_assignments set starter=$1, updated_at=now() where id=$2 and class_id=$3`, *req.Starter, assignmentID, classID)
+	}
+	if req.SubmitPath != nil {
+		_, _ = a.db.Exec(c.Request.Context(), `update class_assignments set submit_path=$1, updated_at=now() where id=$2 and class_id=$3`, *req.SubmitPath, assignmentID, classID)
+	}
+	logEvent(c.Request.Context(), a.db, user.ID, "assignment.update", classID+":"+assignmentID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (a *App) deleteAssignment(c *gin.Context) {
+	user := currentUser(c)
+	classID := c.Param("classID")
+	assignmentID := c.Param("assignmentID")
+	if ok, err := canManageClass(c.Request.Context(), a.db, user, classID); err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	_, _ = a.db.Exec(c.Request.Context(), `delete from class_assignments where id=$1 and class_id=$2`, assignmentID, classID)
+	logEvent(c.Request.Context(), a.db, user.ID, "assignment.delete", classID+":"+assignmentID)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
 func nullString(value sql.NullString) any {
 	if value.Valid {
 		return value.String
