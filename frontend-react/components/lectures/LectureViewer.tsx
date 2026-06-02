@@ -72,6 +72,13 @@ export function LectureViewer({ classId, lectureId }: Props) {
     <div className="page-grid">
       <aside className="panel scroll lecture-tree">
         <div className="panel-head"><h3>章节</h3></div>
+        {chapters.length === 0 && (
+          <div className="p-6 text-center text-[#94a3b8] text-sm">
+            {classes.length === 0
+              ? '暂无班级，请先联系管理员创建班级并导入课程内容'
+              : '该班级暂无讲义内容'}
+          </div>
+        )}
         {chapters.map((ch) => (
           <div key={ch.id} className="chapter-block">
             <div className="chapter-title">{ch.title}</div>

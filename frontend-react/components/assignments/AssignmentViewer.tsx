@@ -303,6 +303,13 @@ export function AssignmentViewer({ classId, assignmentId }: Props) {
               </Select>
             </div>
           )}
+          {filteredEntries.length === 0 && (
+            <div className="p-6 text-center text-[#94a3b8] text-sm">
+              {classes.length === 0
+                ? '暂无班级，请先联系管理员创建班级并导入课程内容'
+                : '暂无作业'}
+            </div>
+          )}
           {filteredEntries.map((entry) => {
             const isActive = entry.assignment.id === selected && entry.classId === activeClassId
             return (
